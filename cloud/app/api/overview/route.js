@@ -1,0 +1,19 @@
+import {db} from '../../../lib/db';
+import {buildJourney,buildTechnical,buildInfra,summarizeEvidence} from '../../../lib/analytics';
+export const runtime='nodejs';
+export async function GET(req){
+ try{
+  const sql=db(); const u=new URL(req.url); let agent=u.searchParams.get('agent_id');
+  if(!agent){const r=await sql`SELECT agent_id FROM host_samples ORDER BY collected_at DESC LIMIT 1`;agent=r[0]?.agent_id;if(!agent){const s=await sql`SELECT agent_id FROM spans ORDER BY start_time DESC LIMIT 1`;agent=s[0]?.agent_id;}}
+  if(!agent)return Response.json({agent_id:null,journey:{stages:[]},technical:{edges:[],top_operations:[]},infra:{current:null,baseline:null},evidence:{observations:['Waiting for telemetry.'],actions:[]}});
+  const [hosts,spans]=await Promise.all([
+   sql`SELECT agent_id,hostname,collected_at,cpu,memory,uptime_seconds,disks FROM host_samples WHERE agent_id=${agent} AND collected_at>NOW()-INTERVAL '2 hours' ORDER BY collected_at DESC LIMIT 240`,
+   sql`SELECT trace_id,span_id,parent_span_id,service,operation,kind,start_time,duration_ms,status_code,status_message,attrs,resource FROM spans WHERE agent_id=${agent} AND start_time>NOW()-INTERVAL '15 minutes' ORDER BY start_time DESC LIMIT 5000`
+  ]);
+  const journey=buildJourney(spans), technical=buildTechnical(spans), infra=buildInfra(hosts), evidence=summarizeEvidence(journey,technical,infra);
+  const services=[...new Set(spans.map(s=>s.service))]; const traceIds=[...new Set(spans.map(s=>s.trace_id))];
+  const tm=new Map(); for(const s of spans){let t=tm.get(s.trace_id);if(!t){t={trace_id:s.trace_id,start_time:s.start_time,duration_ms:0,error:false,services:new Set(),operations:[]};tm.set(s.trace_id,t);}t.duration_ms=Math.max(t.duration_ms,Number(s.duration_ms)||0);t.error=t.error||Number(s.status_code)===2;t.services.add(s.service);if(t.operations.length<4)t.operations.push(s.operation);}
+  const recent_traces=[...tm.values()].map(t=>({...t,services:[...t.services]})).sort((a,b)=>new Date(b.start_time)-new Date(a.start_time)).slice(0,8);
+  return Response.json({agent_id:agent,window:'15m',received:{spans:spans.length,traces:traceIds.length,services},journey,technical,infra,evidence,recent_traces,updated_at:new Date().toISOString()});
+ }catch(e){console.error(e);return Response.json({error:e?.message||'overview failed'},{status:500});}
+}

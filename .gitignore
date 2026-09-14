@@ -1,0 +1,6 @@
+.env
+.env.local
+node_modules/
+.next/
+windows/sparem-collector.exe
+*.log
