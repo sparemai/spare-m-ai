@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - bootstrap.b64
-      - .github/workflows/bootstrap.yml
+      - '.bootstrap/**'
+      - '.github/workflows/bootstrap.yml'
 
 permissions:
   contents: write
@@ -17,19 +17,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Extract project source
+
+      - name: Reconstruct and extract source
+        shell: bash
         run: |
-          base64 -d bootstrap.b64 > /tmp/sparem.tar.gz
-          tar -xzf /tmp/sparem.tar.gz
-          rm bootstrap.b64
+          set -euo pipefail
+          cat .bootstrap/part-* > /tmp/sparem-source.b64
+          base64 -d /tmp/sparem-source.b64 > /tmp/sparem-source.tar.gz
+          tar -xzf /tmp/sparem-source.tar.gz
+          test -f cloud/package.json
+          test -f cloud/schema.sql
+          test -f windows/start-collector.ps1
+          rm -rf .bootstrap
+          rm -f bootstrap.b64
+          rm -f .github/workflows/bootstrap.yml
+
       - name: Commit extracted project
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
           git commit -m "Add SPARE-M-AI v0.5 source"
           git push
