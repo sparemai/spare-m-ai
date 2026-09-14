@@ -1,0 +1,35 @@
+name: Bootstrap SPARE-M-AI source
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - bootstrap.b64
+      - .github/workflows/bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Extract project source
+        run: |
+          base64 -d bootstrap.b64 > /tmp/sparem.tar.gz
+          tar -xzf /tmp/sparem.tar.gz
+          rm bootstrap.b64
+      - name: Commit extracted project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Add SPARE-M-AI v0.5 source"
+          git push
