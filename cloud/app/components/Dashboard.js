@@ -1,97 +1,108 @@
 'use client';
 import {useEffect,useMemo,useState} from 'react';
 
+const JOURNEYS=['All','Search','Select','Login','Book','Payment','Confirm'];
+const RANGES=[['15m','Last 15 min'],['1h','Last 1 hour'],['6h','Last 6 hours'],['24h','Last 24 hours']];
 const ms=v=>Number(v||0)>=1000?`${(Number(v||0)/1000).toFixed(2)} s`:`${Math.round(Number(v||0))} ms`;
 const pct=v=>`${Number(v||0).toFixed(1)}%`;
 const shortService=v=>String(v||'unknown').replace(/^easytravel-/,'').replaceAll('-',' ');
+const when=v=>v?new Date(v).toLocaleString([], {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—';
+const coeff=v=>v===null||v===undefined?'n/a':Number(v).toFixed(2);
 
-function Tone({children,t='neutral'}){return <span className={`tone ${t}`}>{children}</span>}
+function Badge({children,t='neutral'}){return <span className={`badge ${t}`}>{children}</span>}
 
-function Journey({data}){
- const stages=data?.stages||[];
- return <section className="panel hero">
-  <div className="panelHead"><div><div className="eyebrow">LAYER 1 • BUSINESS JOURNEY</div><h2>{data?.name||'EasyTravel Journey'}</h2></div><Tone t={data?.mode==='business-semantic'?'good':'watch'}>{data?.mode==='business-semantic'?'Business semantic':'Inferred proxy'}</Tone></div>
-  <p className="muted">Follow the customer flow first. The pipe narrows where errors, latency, or stage activity deteriorate.</p>
-  <div className="journey">{stages.length?stages.map((s,i)=><div className="stageWrap" key={s.name}><div className={`stage ${s.name===data?.primary_leak?.name?'hot':''}`}><div className="stageName">{s.name}</div><div className="stageValue">{s.count}</div><div className="mini">p95 {ms(s.p95_ms)}</div><div className="mini">errors {pct(s.error_rate)}</div>{i>0&&<div className="leak">↓ {pct(s.leakage_pct)} proxy leak</div>}</div>{i<stages.length-1&&<div className="pipe"><span style={{opacity:Math.max(.25,1-(s.leakage_pct||0)/100)}}/></div>}</div>):<div className="empty">Waiting for application traces…</div>}</div>
-  {data?.mode!=='business-semantic'&&<div className="notice">Stage leakage is an estimate from request activity. Add <code>sparem.business.step</code> later for true business conversion measurement.</div>}
+function Header({data,range,setRange,journey,setJourney,onRefresh,loading}){
+ const f=data?.filters;
+ return <>
+  <header className="topbar"><div className="brand"><div className="mark">M</div><div><b>SPARE-M</b><span>Business Reliability Intelligence</span></div></div><div className="topRight"><div className="live"><i/> {data?.agent_id||'waiting for telemetry'}</div><span className="updated">Updated {when(data?.updated_at)}</span></div></header>
+  <div className="controlBar">
+   <div className="controlGroup"><label>Time window</label><select value={range} onChange={e=>setRange(e.target.value)}>{RANGES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></div>
+   <div className="controlGroup"><label>Journey focus</label><select value={journey} onChange={e=>setJourney(e.target.value)}>{JOURNEYS.map(v=><option key={v}>{v}</option>)}</select></div>
+   <div className="controlRange"><span>From</span><b>{when(f?.from)}</b><span>To</span><b>{when(f?.to)}</b></div>
+   <button className="refreshBtn" onClick={onRefresh} disabled={loading}>{loading?'Refreshing…':'Refresh'}</button>
+  </div>
+ </>
+}
+
+function Kpis({data}){
+ const c=data?.infra?.current,focus=data?.focused_journey?.primary_leak,received=data?.received||{};
+ const state=(focus?.error_rate||0)>5?'Critical':(focus?.p95_ms||0)>1500?'Attention':'Healthy';
+ return <section className="kpiGrid">
+  <div className="kpi primary"><span>Reliability state</span><b>{state}</b><small>{data?.filters?.journey==='All'?'All mapped journeys':`${data?.filters?.journey} journey`} • {data?.filters?.range}</small></div>
+  <div className="kpi"><span>Selected traces</span><b>{received.traces||0}</b><small>{received.distributed_traces||0} distributed</small></div>
+  <div className="kpi"><span>Application p95</span><b>{ms(focus?.p95_ms||0)}</b><small>{focus?.name||'No mapped stage selected'}</small></div>
+  <div className="kpi"><span>Host CPU</span><b>{c?pct(c.cpu):'—'}</b><small>{c?`baseline ${pct(data?.infra?.baseline?.cpu)}`:'no host sample'}</small></div>
+  <div className="kpi"><span>Host memory</span><b>{c?pct(c.memory):'—'}</b><small>{c?`baseline ${pct(data?.infra?.baseline?.memory)}`:'no host sample'}</small></div>
  </section>
 }
 
-function ServiceMap({data,traces,onTrace}){
- const stats=data?.service_stats||[];
- const edges=data?.edges||[];
- const cross=edges.filter(e=>e.from!==e.to);
- const internal=edges.filter(e=>e.from===e.to);
- const traceFor=(edge)=>(traces||[]).find(t=>(t.services||[]).includes(edge.from)&&(t.services||[]).includes(edge.to));
- return <div className="serviceMap">
-  <div className="serviceNodes">{stats.length?stats.map((s,i)=><div className="svcNode" key={s.service}>
-   <div className="svcTop"><span className={`svcDot s${i%4}`}/><div><b>{shortService(s.service)}</b><small>{s.service}</small></div></div>
-   <div className="svcMetrics"><span><b>{s.traces}</b><small>traces</small></span><span><b>{ms(s.p95_ms)}</b><small>p95</small></span><span><b>{pct(s.error_rate)}</b><small>errors</small></span></div>
-  </div>):<div className="empty">Waiting for service spans…</div>}</div>
-  <div className="serviceEdges"><div className="mapLabel">Distributed calls</div>{cross.length?cross.map((e,i)=>{const sample=traceFor(e);return <button className="svcEdge" key={`${e.from}-${e.to}-${i}`} disabled={!sample} onClick={()=>sample&&onTrace(sample.trace_id)} title={sample?'Open a distributed trace':'No sampled distributed trace available'}>
-   <span className="svcFrom">{shortService(e.from)}</span><span className="arrow"><i/>→</span><span className="svcTo">{shortService(e.to)}</span><strong>{e.calls} calls</strong><small>p95 {ms(e.p95_ms)} • {pct(e.error_rate)} errors{sample?' • open trace':''}</small>
-  </button>}):<div className="empty">Cross-service calls will appear when trace context propagates between services.</div>}</div>
-  {internal.length>0&&<div className="internalCalls"><span>Internal span relationships</span>{internal.map((e,i)=><small key={i}>{shortService(e.from)}: {e.calls} calls • p95 {ms(e.p95_ms)}</small>)}</div>}
- </div>
-}
-
-function Technical({data,onTrace,traces}){
- return <section className="panel">
-  <div className="panelHead"><div><div className="eyebrow">LAYER 2 • TECHNICAL EXECUTION</div><h2>Service map & distributed execution</h2></div><Tone t={(data?.edges||[]).some(e=>e.from!==e.to)?'good':'watch'}>{(data?.edges||[]).some(e=>e.from!==e.to)?'Context propagated':'Single-service only'}</Tone></div>
-  <p className="muted">See which services participate, how they call each other, and open a real trace directly from the dependency edge.</p>
-  <ServiceMap data={data} traces={traces} onTrace={onTrace}/>
-  <div className="techGrid"><div><h3>Highest-risk operations</h3><div className="opList">{(data?.top_operations||[]).map((o,i)=><div className="op" key={i}><div><b>{o.operation}</b><span>{o.service}</span></div><div className="right"><strong>{ms(o.p95_ms)}</strong><span>{pct(o.error_rate)} errors</span></div></div>)}</div></div>
-  <div><h3>Trace samples</h3><div className="traceGrid">{(traces||[]).map(t=><button className={`traceBtn ${t.distributed?'distributed':''}`} onClick={()=>onTrace(t.trace_id)} key={t.trace_id}><span>{t.error?'Error trace':t.distributed?'Distributed trace':'Trace'}</span><b>{t.root_operation||t.operations?.[0]||t.trace_id.slice(0,12)}</b><small>{(t.services||[]).map(shortService).join(' → ')}</small><em>{t.span_count||0} spans • {ms(t.duration_ms)}</em></button>)}</div></div></div>
+function JourneyPipeline({data,selected,onSelect}){
+ const stages=data?.stages||[];const map=data?.mapping||{};
+ return <section className="workspaceCard journeyCard">
+  <div className="sectionHead"><div><span className="sectionIndex">01</span><div><h2>Business journey pipeline</h2><p>Use the journey as the primary filter. Technical and infrastructure views below follow the selected journey traces.</p></div></div><Badge t={data?.mode==='business-semantic'?'good':'watch'}>{data?.mode==='business-semantic'?'Semantic':'Route inferred'} • {data?.confidence||0}%</Badge></div>
+  <div className="journeyPipeline">{stages.map((s,i)=><div className="journeyStepWrap" key={s.name}><button className={`journeyStep ${selected===s.name?'selected':''} ${!s.observed?'emptyStage':''}`} onClick={()=>onSelect(selected===s.name?'All':s.name)}>
+   <div className="stepTop"><span>{String(i+1).padStart(2,'0')}</span><b>{s.name}</b></div><strong>{s.count}</strong><small>mapped server spans</small><div className="stepMetrics"><span>p95 <b>{ms(s.p95_ms)}</b></span><span>Errors <b>{pct(s.error_rate)}</b></span></div><em>{s.observed?s.mapping:'no mapped activity'}</em>
+  </button>{i<stages.length-1&&<div className="stageConnector"><i/></div>}</div>)}</div>
+  <div className="mappingBar"><div><b>How SPARE-M maps this journey</b><span>{map.note||'Waiting for mapping metadata.'}</span></div><div className="mappingMeta"><span>Strategy <b>{map.strategy||'—'}</b></span><span>Mapped spans <b>{map.mapped_server_spans||0}</b></span><span>Explicit share <b>{pct(map.explicit_share_pct||0)}</b></span></div></div>
  </section>
 }
 
-function Infrastructure({data}){
- const c=data?.current,b=data?.baseline;
- return <section className="panel"><div className="panelHead"><div><div className="eyebrow">LAYER 3 • INFRASTRUCTURE</div><h2>Is the underlying Windows host contributing?</h2></div>{c&&<Tone t={(c.cpu>=90||c.memory>=90)?'bad':(c.cpu>=75||c.memory>=80)?'watch':'good'}>{c.hostname}</Tone>}</div>{c?<div className="metrics"><div><span>CPU</span><strong>{pct(c.cpu)}</strong><small>cloud baseline {pct(b?.cpu)}</small></div><div><span>Memory</span><strong>{pct(c.memory)}</strong><small>cloud baseline {pct(b?.memory)}</small></div><div><span>Disk max</span><strong>{pct(c.disk_max)}</strong><small>highest fixed disk use</small></div><div><span>Uptime</span><strong>{Math.floor(c.uptime_seconds/3600)}h</strong><small>Windows uptime</small></div></div>:<div className="empty">Waiting for Windows host collector…</div>}</section>
+function Sparkline({points,dataKey,maxHint}){
+ const values=points.map(p=>Number(p[dataKey])).filter(Number.isFinite);const max=Math.max(maxHint||0,...values,1),min=Math.min(...values,0);const range=Math.max(1,max-min);
+ const xy=points.map((p,i)=>{const v=Number(p[dataKey]);const x=points.length<=1?0:(i/(points.length-1))*100;const y=Number.isFinite(v)?100-((v-min)/range*100):100;return `${x},${y}`}).join(' ');
+ return <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points={xy}/></svg>
 }
+
+function Correlation({data}){
+ const c=data?.correlation||{},points=c.points||[],infra=data?.infra||{};const latest=points[points.length-1]||{};
+ return <section className="workspaceCard correlationCard">
+  <div className="sectionHead"><div><span className="sectionIndex">02</span><div><h2>Application ↔ infrastructure correlation</h2><p>Aligned time buckets show whether application latency moves with host CPU or memory for the selected journey.</p></div></div><Badge t={c.verdict?.startsWith('strong')?'bad':c.verdict?.startsWith('moderate')?'watch':'good'}>{c.verdict||'no data'}</Badge></div>
+  <div className="correlationLayout"><div className="trendStack">
+   <div className="trendRow"><div className="trendLabel"><span>Application p95</span><b>{ms(latest.p95_ms||0)}</b></div><div className="trendChart app"><Sparkline points={points} dataKey="p95_ms"/></div></div>
+   <div className="trendRow"><div className="trendLabel"><span>Host CPU</span><b>{latest.cpu===null||latest.cpu===undefined?'—':pct(latest.cpu)}</b></div><div className="trendChart cpu"><Sparkline points={points} dataKey="cpu" maxHint={100}/></div></div>
+   <div className="trendRow"><div className="trendLabel"><span>Host memory</span><b>{latest.memory===null||latest.memory===undefined?'—':pct(latest.memory)}</b></div><div className="trendChart mem"><Sparkline points={points} dataKey="memory" maxHint={100}/></div></div>
+   <div className="timeAxis"><span>{when(points[0]?.time)}</span><span>{when(points[Math.floor(points.length/2)]?.time)}</span><span>{when(points[points.length-1]?.time)}</span></div>
+  </div><div className="correlationVerdict">
+   <div className="corrMetric"><span>Latency ↔ CPU</span><b>{coeff(c.latency_cpu)}</b></div><div className="corrMetric"><span>Latency ↔ Memory</span><b>{coeff(c.latency_memory)}</b></div>
+   <div className="hostSnapshot"><span>Host snapshot</span><b>{infra.current?.hostname||'No host'}</b><small>CPU {infra.current?pct(infra.current.cpu):'—'} • Memory {infra.current?pct(infra.current.memory):'—'} • Disk {infra.current?pct(infra.current.disk_max):'—'}</small></div>
+   <p>{c.note||'Correlation is shown only when enough aligned samples exist.'}</p>
+  </div></div>
+ </section>
+}
+
+function ServiceTopology({data,traces,onTrace}){
+ const stats=data?.service_stats||[],edges=(data?.edges||[]).filter(e=>e.from!==e.to);
+ const sampleFor=e=>(traces||[]).find(t=>(t.services||[]).includes(e.from)&&(t.services||[]).includes(e.to));
+ return <section className="workspaceCard">
+  <div className="sectionHead"><div><span className="sectionIndex">03</span><div><h2>Service topology</h2><p>Only dependencies observed inside the currently selected journey and time window are shown.</p></div></div><Badge t={edges.length?'good':'watch'}>{edges.length?'Distributed context':'No cross-service edge'}</Badge></div>
+  <div className="topologyGrid"><div className="topologyCanvas">{stats.map((s,i)=><div className="serviceNode" key={s.service}><div className="nodeTitle"><i className={`dot d${i%4}`}/><div><b>{shortService(s.service)}</b><small>{s.service}</small></div></div><div className="nodeStats"><span>Traces <b>{s.traces}</b></span><span>p95 <b>{ms(s.p95_ms)}</b></span><span>Errors <b>{pct(s.error_rate)}</b></span></div></div>)}
+   <div className="dependencyList">{edges.length?edges.map((e,i)=>{const sample=sampleFor(e);return <button key={i} onClick={()=>sample&&onTrace(sample.trace_id)} disabled={!sample}><span>{shortService(e.from)}</span><b>→</b><span>{shortService(e.to)}</span><em>{e.calls} calls</em><small>p95 {ms(e.p95_ms)} • {pct(e.error_rate)} errors</small></button>}):<div className="emptyMsg">No cross-service dependency for this selection.</div>}</div>
+  </div><div className="riskOps"><h3>Highest-risk operations</h3>{(data?.top_operations||[]).slice(0,8).map((o,i)=><div className="riskRow" key={i}><span className="rank">{String(i+1).padStart(2,'0')}</span><div><b>{o.operation}</b><small>{o.service}</small></div><strong>{ms(o.p95_ms)}</strong><em>{pct(o.error_rate)} errors</em></div>)}</div></div>
+ </section>
+}
+
+function TraceExplorer({traces,onTrace}){
+ return <section className="workspaceCard">
+  <div className="sectionHead"><div><span className="sectionIndex">04</span><div><h2>Trace explorer</h2><p>Traces are already filtered by the control bar. Open any row for the full span waterfall.</p></div></div><Badge>{traces?.length||0} samples</Badge></div>
+  <div className="traceTableWrap"><table className="traceTable"><thead><tr><th>Timestamp</th><th>Journey</th><th>Entry operation</th><th>Service path</th><th>Duration</th><th>Spans</th><th>Status</th></tr></thead><tbody>{(traces||[]).map(t=><tr key={t.trace_id} onClick={()=>onTrace(t.trace_id)}><td>{when(t.start_time)}</td><td><span className="journeyTags">{(t.journeys||[]).length?t.journeys.join(' → '):'Unmapped'}</span></td><td><b>{t.root_operation||t.operations?.[0]||'unknown'}</b><small>{t.trace_id.slice(0,12)}…</small></td><td>{(t.services||[]).map(shortService).join(' → ')}</td><td>{ms(t.duration_ms)}</td><td>{t.span_count}</td><td><Badge t={t.error?'bad':t.distributed?'good':'neutral'}>{t.error?'Error':t.distributed?'Distributed':'Single service'}</Badge></td></tr>)}</tbody></table>{!(traces||[]).length&&<div className="emptyMsg">No traces match this journey/time selection.</div>}</div>
+ </section>
+}
+
+function Evidence({data}){return <section className="workspaceCard evidenceCard"><div className="sectionHead"><div><span className="sectionIndex">05</span><div><h2>Evidence & next investigation</h2><p>Deterministic findings from the selected business and technical context.</p></div></div></div><div className="evidenceGrid"><div><h3>Observed</h3>{(data?.observations||[]).map((x,i)=><p key={i}>• {x}</p>)}</div><div><h3>Investigate next</h3>{(data?.actions||[]).map((x,i)=><p key={i}>→ {x}</p>)}</div></div></section>}
 
 function TraceDrawer({trace,onClose}){
- if(!trace)return null;
- if(trace.loading)return <><div className="drawerBackdrop" onClick={onClose}/><div className="drawer"><div className="drawerHead"><div><div className="eyebrow">TRACE WATERFALL</div><h2>{trace.trace_id}</h2></div><button onClick={onClose}>Close</button></div><div className="empty">Loading trace spans…</div></div></>;
- if(trace.error)return <><div className="drawerBackdrop" onClick={onClose}/><div className="drawer"><div className="drawerHead"><div><div className="eyebrow">TRACE WATERFALL</div><h2>{trace.trace_id}</h2></div><button onClick={onClose}>Close</button></div><div className="notice badbox">{trace.error}</div></div></>;
- const spans=trace.spans||[];
- const byId=new Map(spans.map(s=>[s.span_id,s]));
- const depthMemo=new Map();
- const depthOf=s=>{if(depthMemo.has(s.span_id))return depthMemo.get(s.span_id);let d=0,p=s.parent_span_id,guard=0;while(p&&byId.has(p)&&guard++<12){d++;p=byId.get(p)?.parent_span_id}depthMemo.set(s.span_id,d);return d};
- const min=spans.length?Math.min(...spans.map(s=>new Date(s.start_time).getTime())):0;
- const ends=spans.map(s=>new Date(s.start_time).getTime()+Number(s.duration_ms||0));
- const max=ends.length?Math.max(...ends):min+1;
- const range=Math.max(1,max-min);
- const summary=trace.summary||{};
- const slow=summary.slowest_span;
- return <><div className="drawerBackdrop" onClick={onClose}/><div className="drawer">
-  <div className="drawerHead"><div><div className="eyebrow">TRACE WATERFALL</div><h2>{trace.trace_id}</h2><p>{summary.root_operation||'Distributed request'}</p></div><button onClick={onClose}>Close</button></div>
-  <div className="traceSummary"><div><span>Total</span><b>{ms(summary.duration_ms??range)}</b></div><div><span>Spans</span><b>{summary.span_count??spans.length}</b></div><div><span>Services</span><b>{summary.service_count??new Set(spans.map(s=>s.service)).size}</b></div><div><span>Errors</span><b>{summary.error_count??spans.filter(s=>Number(s.status_code)===2).length}</b></div></div>
-  {slow&&<div className="slowest"><span>Slowest sampled span</span><b>{slow.operation}</b><small>{shortService(slow.service)} • {ms(slow.duration_ms)}</small></div>}
-  <div className="wfLegend"><span>0 ms</span><span>{ms(range*.25)}</span><span>{ms(range*.5)}</span><span>{ms(range*.75)}</span><span>{ms(range)}</span></div>
-  <div className="waterfall">{spans.map(s=>{const start=(new Date(s.start_time).getTime()-min)/range*100;const width=Math.max(.7,Number(s.duration_ms||0)/range*100);const parent=byId.get(s.parent_span_id);const cross=parent&&parent.service!==s.service;const error=Number(s.status_code)===2||Number(s.attrs?.['http.response.status_code']||0)>=500;const depth=Math.min(depthOf(s),7);return <div className={`wf ${cross?'cross':''}`} key={s.span_id}><div className="wfLabel" style={{paddingLeft:`${depth*13}px`}}><div className="wfOp">{depth>0&&<span className="branch">↳</span>}<b title={s.operation}>{s.operation}</b>{cross&&<span className="hop">service hop</span>}</div><span>{shortService(s.service)} • {ms(s.duration_ms)}</span></div><div className="track"><i className={error?'err':''} style={{left:`${Math.max(0,start)}%`,width:`${Math.min(100-start,width)}%`}} title={`${s.service} • ${s.operation} • ${ms(s.duration_ms)}`}/></div></div>})}</div>
- </div></>
-}
-
-function AI({agent}){
- const [result,setResult]=useState(null),[loading,setLoading]=useState(false);
- async function run(mode){setLoading(true);setResult(null);try{const r=await fetch('/api/analyze',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({agent_id:agent,mode})});setResult(await r.json())}finally{setLoading(false)}}
- const a=result?.response;
- return <section className="panel ai"><div className="panelHead"><div><div className="eyebrow">SPARE-M AI</div><h2>Explain impact → cause candidates → next fix</h2></div><div className="actions"><button disabled={!agent||loading} onClick={()=>run('quick')}>Quick AI</button><button className="secondary" disabled={!agent||loading} onClick={()=>run('deep')}>Deep investigate</button></div></div>{loading&&<div className="empty">Reasoning over the compact evidence graph…</div>}{result?.error&&<div className="notice badbox">{result.error}</div>}{a&&<div className="aiBody"><div className="aiSummary"><strong>{a.summary}</strong><Tone t={a.confidence>=80?'good':a.confidence>=60?'watch':'neutral'}>{a.confidence}% confidence</Tone></div><div className="aiCols"><div><h3>Business impact</h3><p>{a.business_impact}</p><h3>Technical</h3><p>{a.technical_assessment}</p><h3>Infrastructure</h3><p>{a.infrastructure_assessment}</p></div><div><h3>Next actions</h3>{(a.next_actions||[]).map((x,i)=><p className="action" key={i}>{i+1}. {x}</p>)}<h3>Evidence gaps</h3>{(a.evidence_gaps||[]).map((x,i)=><p className="gap" key={i}>{x}</p>)}</div></div></div>}</section>
+ if(!trace)return null;if(trace.loading)return <><div className="drawerBackdrop" onClick={onClose}/><aside className="drawer"><div className="drawerHeader"><h2>Trace waterfall</h2><button onClick={onClose}>Close</button></div><div className="emptyMsg">Loading trace…</div></aside></>;
+ if(trace.error)return <><div className="drawerBackdrop" onClick={onClose}/><aside className="drawer"><div className="drawerHeader"><h2>Trace waterfall</h2><button onClick={onClose}>Close</button></div><div className="errorBox">{trace.error}</div></aside></>;
+ const spans=trace.spans||[],byId=new Map(spans.map(s=>[s.span_id,s])),depth=s=>{let d=0,p=s.parent_span_id,g=0;while(p&&byId.has(p)&&g++<12){d++;p=byId.get(p)?.parent_span_id}return Math.min(d,7)};
+ const min=spans.length?Math.min(...spans.map(s=>new Date(s.start_time).getTime())):0,ends=spans.map(s=>new Date(s.start_time).getTime()+Number(s.duration_ms||0)),max=ends.length?Math.max(...ends):min+1,range=Math.max(1,max-min),summary=trace.summary||{};
+ return <><div className="drawerBackdrop" onClick={onClose}/><aside className="drawer"><div className="drawerHeader"><div><span>TRACE WATERFALL</span><h2>{summary.root_operation||trace.trace_id}</h2><small>{trace.trace_id}</small></div><button onClick={onClose}>Close</button></div><div className="drawerKpis"><div><span>Total</span><b>{ms(summary.duration_ms||range)}</b></div><div><span>Spans</span><b>{summary.span_count||spans.length}</b></div><div><span>Services</span><b>{summary.service_count||0}</b></div><div><span>Errors</span><b>{summary.error_count||0}</b></div></div>{summary.slowest_span&&<div className="slowSpan"><span>Slowest span</span><b>{summary.slowest_span.operation}</b><small>{shortService(summary.slowest_span.service)} • {ms(summary.slowest_span.duration_ms)}</small></div>}<div className="waterfall">{spans.map(s=>{const start=(new Date(s.start_time).getTime()-min)/range*100,width=Math.max(.6,Number(s.duration_ms||0)/range*100),parent=byId.get(s.parent_span_id),hop=parent&&parent.service!==s.service,error=Number(s.status_code)===2||Number(s.attrs?.['http.response.status_code']||0)>=500;return <div className={`wfRow ${hop?'hopRow':''}`} key={s.span_id}><div className="wfLabel" style={{paddingLeft:`${depth(s)*12}px`}}><b>{s.operation}</b><small>{shortService(s.service)} • {ms(s.duration_ms)}{hop?' • service hop':''}</small></div><div className="wfTrack"><i className={error?'error':''} style={{left:`${start}%`,width:`${Math.min(100-start,width)}%`}}/></div></div>})}</div></aside></>;
 }
 
 export default function Dashboard(){
- const [d,setD]=useState(null),[err,setErr]=useState(''),[trace,setTrace]=useState(null);
- async function load(){try{const r=await fetch('/api/overview',{cache:'no-store'});const j=await r.json();if(!r.ok)throw new Error(j.error||'load failed');setD(j);setErr('')}catch(e){setErr(e.message)}}
- useEffect(()=>{load();const i=setInterval(load,15000);return()=>clearInterval(i)},[]);
- async function openTrace(id){setTrace({loading:true,trace_id:id});try{const r=await fetch(`/api/trace?trace_id=${encodeURIComponent(id)}`,{cache:'no-store'});const j=await r.json();if(!r.ok)throw new Error(j.error||'trace load failed');setTrace(j)}catch(e){setTrace({error:e.message,trace_id:id})}}
- const health=useMemo(()=>{const c=d?.infra?.current,l=d?.journey?.primary_leak;if(!c&&!l)return'Waiting';if((l?.error_rate||0)>10||(c?.cpu||0)>95)return'Critical';if((l?.p95_ms||0)>1500||(l?.error_rate||0)>3||(c?.cpu||0)>80)return'Attention';return'Healthy'},[d]);
- return <main><header><div className="brand"><div className="mark">M</div><div><b>SPARE-M-AI</b><span>Business-to-infrastructure intelligence</span></div></div><div className="live"><i/> {d?.agent_id||'waiting for collector'}</div></header>
- <div className="overview"><div><div className="eyebrow">CURRENT ASSESSMENT</div><h1>{health}</h1><p>{d?.evidence?.observations?.[0]||'Connect the Windows collector and EasyTravel tracing.'}</p></div><div className="overviewStats"><div><span>Services</span><b>{d?.received?.services?.length||0}</b></div><div><span>Traces / 15m</span><b>{d?.received?.traces||0}</b></div><div><span>Distributed</span><b>{d?.received?.distributed_traces||0}</b></div><div><span>Spans / 15m</span><b>{d?.received?.spans||0}</b></div></div></div>
- {err&&<div className="notice badbox">{err}</div>}
- <Journey data={d?.journey}/>
- <Technical data={d?.technical} traces={d?.recent_traces} onTrace={openTrace}/>
- <Infrastructure data={d?.infra}/>
- <section className="panel evidence"><div className="eyebrow">EVIDENCE, NOT NOISE</div><div className="evidenceCols"><div><h3>What we know</h3>{(d?.evidence?.observations||[]).map((x,i)=><p key={i}>• {x}</p>)}</div><div><h3>What to inspect next</h3>{(d?.evidence?.actions||[]).map((x,i)=><p key={i}>→ {x}</p>)}</div></div></section>
- <AI agent={d?.agent_id}/><footer>All analytics, baselines, journey inference and AI run in Vercel. Windows only collects and exports telemetry.</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
+ const [range,setRange]=useState('15m'),[journey,setJourney]=useState('All'),[data,setData]=useState(null),[error,setError]=useState(''),[loading,setLoading]=useState(false),[trace,setTrace]=useState(null);
+ async function load(){setLoading(true);try{const r=await fetch(`/api/overview?range=${encodeURIComponent(range)}&journey=${encodeURIComponent(journey)}`,{cache:'no-store'});const j=await r.json();if(!r.ok)throw new Error(j.error||'Failed to load overview');setData(j);setError('')}catch(e){setError(e.message)}finally{setLoading(false)}}
+ useEffect(()=>{load();const id=setInterval(load,15000);return()=>clearInterval(id)},[range,journey]);
+ async function openTrace(id){setTrace({loading:true,trace_id:id});try{const r=await fetch(`/api/trace?trace_id=${encodeURIComponent(id)}`,{cache:'no-store'});const j=await r.json();if(!r.ok)throw new Error(j.error||'Failed to load trace');setTrace(j)}catch(e){setTrace({trace_id:id,error:e.message})}}
+ const capped=data?.data_quality?.span_cap_reached;
+ return <main className="console"><Header data={data} range={range} setRange={setRange} journey={journey} setJourney={setJourney} onRefresh={load} loading={loading}/>{error&&<div className="errorBox">{error}</div>}{capped&&<div className="warningBox">The selected window reached the 50,000-span query cap. The view is representative but not exhaustive.</div>}<Kpis data={data}/><JourneyPipeline data={data?.journey} selected={journey} onSelect={setJourney}/><Correlation data={data}/><ServiceTopology data={data?.technical} traces={data?.recent_traces} onTrace={openTrace}/><TraceExplorer traces={data?.recent_traces} onTrace={openTrace}/><Evidence data={data?.evidence}/><footer>SPARE-M • Journey-first reliability intelligence • {data?.filters?.journey||'All'} • {data?.filters?.range||range}</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
 }
