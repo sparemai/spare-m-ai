@@ -9,6 +9,7 @@ const patterns={
 };
 const pct=(n,d)=>d?Math.round(n/d*1000)/10:0;
 const percentile=(a,p)=>{if(!a.length)return 0; const s=[...a].sort((x,y)=>x-y); return s[Math.min(s.length-1,Math.max(0,Math.ceil(p*s.length)-1))];};
+const isError=s=>Number(s.status_code)===2||Number(s.attrs?.['http.response.status_code']||0)>=500;
 export function stageOf(span){
  const explicit=span.attrs?.['sparem.business.step']; if(explicit)return String(explicit);
  if(Number(span.kind)!==2)return null;
@@ -19,7 +20,7 @@ export function stageOf(span){
 export function buildJourney(spans){
  const map=new Map(JOURNEY_ORDER.map(s=>[s,{name:s,count:0,errors:0,durations:[],services:new Set()}]));
  let explicit=0;
- for(const s of spans){const step=stageOf(s);if(!step)continue;if(s.attrs?.['sparem.business.step'])explicit++;if(!map.has(step))map.set(step,{name:step,count:0,errors:0,durations:[],services:new Set()});const x=map.get(step);x.count++;if(Number(s.status_code)===2||Number(s.attrs?.['http.response.status_code']||0)>=500)x.errors++;x.durations.push(Number(s.duration_ms)||0);x.services.add(s.service);}
+ for(const s of spans){const step=stageOf(s);if(!step)continue;if(s.attrs?.['sparem.business.step'])explicit++;if(!map.has(step))map.set(step,{name:step,count:0,errors:0,durations:[],services:new Set()});const x=map.get(step);x.count++;if(isError(s))x.errors++;x.durations.push(Number(s.duration_ms)||0);x.services.add(s.service);}
  const stages=[...map.values()].filter(x=>x.count>0).map(x=>({name:x.name,count:x.count,error_rate:pct(x.errors,x.count),p95_ms:Math.round(percentile(x.durations,.95)),services:[...x.services]}));
  // Rate loss is only a proxy unless custom business-step correlation is present.
  for(let i=0;i<stages.length;i++){const prev=i?stages[i-1].count:stages[i].count;stages[i].leakage_pct=i&&prev?Math.max(0,Math.round((prev-stages[i].count)/prev*1000)/10):0;}
@@ -28,11 +29,16 @@ export function buildJourney(spans){
 }
 export function buildTechnical(spans){
  const byId=new Map(spans.map(s=>[`${s.trace_id}:${s.span_id}`,s])); const edges=new Map();
- for(const child of spans){if(!child.parent_span_id)continue;const parent=byId.get(`${child.trace_id}:${child.parent_span_id}`);if(!parent)continue;const key=`${parent.service}→${child.service}`;let e=edges.get(key);if(!e){e={from:parent.service,to:child.service,calls:0,errors:0,durations:[]};edges.set(key,e);}e.calls++;if(Number(child.status_code)===2)e.errors++;e.durations.push(Number(child.duration_ms)||0);}
- const list=[...edges.values()].map(e=>({from:e.from,to:e.to,calls:e.calls,error_rate:pct(e.errors,e.calls),p95_ms:Math.round(percentile(e.durations,.95))})).sort((a,b)=>b.calls-a.calls).slice(0,12);
- const ops={}; for(const s of spans){const k=`${s.service} • ${s.operation}`;if(!ops[k])ops[k]={service:s.service,operation:s.operation,count:0,errors:0,durations:[]};const o=ops[k];o.count++;if(Number(s.status_code)===2)o.errors++;o.durations.push(Number(s.duration_ms)||0);}
+ for(const child of spans){if(!child.parent_span_id)continue;const parent=byId.get(`${child.trace_id}:${child.parent_span_id}`);if(!parent)continue;const key=`${parent.service}→${child.service}`;let e=edges.get(key);if(!e){e={from:parent.service,to:child.service,calls:0,errors:0,durations:[]};edges.set(key,e);}e.calls++;if(isError(child))e.errors++;e.durations.push(Number(child.duration_ms)||0);}
+ const list=[...edges.values()].map(e=>({from:e.from,to:e.to,calls:e.calls,error_rate:pct(e.errors,e.calls),p95_ms:Math.round(percentile(e.durations,.95))})).sort((a,b)=>b.calls-a.calls).slice(0,20);
+ const ops={}; const services={};
+ for(const s of spans){
+  const k=`${s.service} • ${s.operation}`;if(!ops[k])ops[k]={service:s.service,operation:s.operation,count:0,errors:0,durations:[]};const o=ops[k];o.count++;if(isError(s))o.errors++;o.durations.push(Number(s.duration_ms)||0);
+  const name=s.service||'unknown';if(!services[name])services[name]={service:name,spans:0,errors:0,durations:[],traces:new Set()};const svc=services[name];svc.spans++;if(isError(s))svc.errors++;svc.durations.push(Number(s.duration_ms)||0);svc.traces.add(s.trace_id);
+ }
  const top=Object.values(ops).map(o=>({service:o.service,operation:o.operation,count:o.count,error_rate:pct(o.errors,o.count),p95_ms:Math.round(percentile(o.durations,.95))})).sort((a,b)=>(b.p95_ms+b.error_rate*100)-(a.p95_ms+a.error_rate*100)).slice(0,10);
- return {edges:list,top_operations:top};
+ const service_stats=Object.values(services).map(s=>({service:s.service,spans:s.spans,traces:s.traces.size,error_rate:pct(s.errors,s.spans),p95_ms:Math.round(percentile(s.durations,.95))})).sort((a,b)=>b.spans-a.spans);
+ return {edges:list,top_operations:top,service_stats};
 }
 export function buildInfra(hostRows){
  if(!hostRows.length)return {current:null,baseline:null};const latest=hostRows[0];const baselineRows=hostRows.slice(1);const avg=(k)=>baselineRows.length?baselineRows.reduce((s,r)=>s+Number(r[k]||0),0)/baselineRows.length:0;
