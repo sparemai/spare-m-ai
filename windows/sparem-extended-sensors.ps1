@@ -161,7 +161,7 @@ function Check-ConfigChanges{
     $old=$configHashes[$file];$configHashes[$file]=$hash
     $out+=@{
      event_time=(Get-Date).ToUniversalTime().ToString('o');agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id=$file
-     data=@{kind='configuration_change';file=[IO.Path]::GetFileName($file);path_hash=(Mask-Log ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($file))));old_sha256=$old;new_sha256=$hash;last_write_utc=$item.LastWriteTimeUtc.ToString('o')}
+     data=@{kind='configuration_change';file=[IO.Path]::GetFileName($file);old_sha256=$old;new_sha256=$hash;last_write_utc=$item.LastWriteTimeUtc.ToString('o')}
     }
    }
   }catch{Write-Warning "config watch failed for $file : $($_.Exception.Message)"}
