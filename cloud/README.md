@@ -1,36 +1,136 @@
-# SPARE-M-AI Cloud v0.5 — Vercel
+# SPARE-M Cloud
 
-This folder is the **entire intelligence/application side**. Deploy this folder to Vercel.
+The cloud folder is the intelligence, storage, API and UI side of SPARE-M. Windows and other adapters collect/export evidence; Vercel performs normalization, correlation, intelligence and AI reasoning.
 
-## What runs here
-- telemetry ingestion APIs
-- OTLP/protobuf trace decoding
-- safe attribute filtering
-- Neon/Postgres storage
-- business-journey inference
-- technical service/operation graph
-- cloud-side host baselines
-- trace waterfall API
-- deterministic evidence generation
-- optional OpenAI reasoning on button click
-- the complete UI
+## Signal paths
 
-## What does NOT run on Windows
-No database, no health engine, no journey inference, no UI, no LLM, no trace parsing service.
+### OpenTelemetry
+- `POST /api/otlp/v1/traces` — sampled distributed traces
+- `POST /api/otlp/v1/metrics` — JVM/runtime and other OTLP metrics
+- `POST /api/otlp/v1/logs` — correlated OTLP logs
 
-## Deploy
-1. Create a Vercel project using this `cloud` folder as the project root.
-2. Add a Postgres database (Neon is a convenient Vercel integration) and expose `DATABASE_URL`.
-3. Run `schema.sql` in that database.
-4. Set environment variables:
-   - `DATABASE_URL`
-   - `SPAREM_INGEST_KEY` — long random value; use the same value on Windows
-   - `OPENAI_API_KEY` — optional, only needed for Quick AI / Deep AI
-5. Redeploy.
-6. Confirm `https://YOUR-APP.vercel.app/api/health` returns `ok: true`.
+### Native SPARE-M collection
+- `POST /api/ingest/host` — lightweight host CPU/memory/disk-capacity samples
+- `POST /api/ingest/{type}` — normalized collector telemetry
+  - `process`
+  - `runtime`
+  - `network`
+  - `disk`
+  - `logs`
+  - `change`
+  - `business`
+  - `database`
+  - `kubernetes`
+  - `cloud`
+  - `profile`
 
-## Data model
-Host samples are retained in `host_samples`. Sampled spans are retained in `spans`. AI results are cached in `ai_analysis` for 15 minutes when evidence is unchanged.
+### Browser / integrations
+- `POST /api/ingest/rum` — browser page/action/error/performance evidence
+- `POST /api/integrations/events` — trusted external integration events
+- `POST /api/integrations/github` — signed GitHub push/release/deployment webhook
+- `POST /api/integrations/feature-flags` — normalized flag/config changes
 
-## Important lab limitation
-Without explicit `sparem.business.step` attributes, the Journey view is inferred from server operation names/routes. The UI labels this `Inferred proxy`; it must not be treated as true user-level conversion loss. This is deliberate.
+### Diagnostics control plane
+- `POST /api/commands` — create an allow-listed diagnostic command
+- `GET /api/commands/next` — collector poll
+- `POST /api/commands/result` — collector result
+
+Only allow-listed actions are supported: JFR capture, thread dump, process snapshot and targeted log collection. There is no arbitrary remote shell endpoint.
+
+## Storage
+
+Core tables:
+- `host_samples`
+- `spans`
+- `telemetry_events`
+- `collector_commands`
+- `ai_analysis`
+
+The app creates the extended telemetry/control tables on demand, but `schema.sql` contains the canonical schema.
+
+For a larger production deployment, high-volume traces/metrics/logs/RUM should eventually move to a columnar/time-series store while Postgres retains configuration, entities, incidents, commands and business metadata.
+
+## Environment variables
+
+Required:
+- `DATABASE_URL`
+- `SPAREM_INGEST_KEY` — collector/OTLP write secret
+
+AI:
+- `OPENAI_API_KEY`
+
+Control/integrations:
+- `SPAREM_CONTROL_KEY` — diagnostic-control API secret
+- `SPAREM_INTEGRATION_KEY` — server-to-server integration write secret
+- `SPAREM_RUM_KEY` — optional browser write token; treat it as a public write-only project token, not a control secret
+- `GITHUB_WEBHOOK_SECRET` — GitHub webhook HMAC secret
+- `SPAREM_GITHUB_AGENT_ID` — optional source ID
+
+Do not reuse the control-plane secret in collectors, browsers or third-party integrations.
+
+## Intelligence
+
+SPARE-M currently calculates:
+- trace hierarchy and exclusive/self-time
+- service/operation attribution
+- request p95 and 4xx/5xx
+- current-vs-previous-window baselines
+- inferred business stages/journey structure
+- evidence graph and competing hypotheses
+- telemetry coverage/gap intelligence
+- process/runtime/network/disk/log/change/business/DB/RUM/cloud/Kubernetes availability
+- Ask SPARE-M tool-driven investigation
+
+Ask SPARE-M uses deterministic SPARE-M evidence as tools. The model should interpret evidence; it should not invent telemetry, transactions, revenue, host ownership or root cause.
+
+Current model mapping:
+- quick/copilot: `gpt-5.4-mini`
+- deep: `gpt-5.5`
+
+## Trusted business events
+
+When a business application sends stable transaction/session IDs and explicit value/currency, SPARE-M can use them instead of sampled-trace proxies for business counts/value.
+
+Example payload to `/api/integrations/events`:
+
+```json
+{
+  "type": "business",
+  "agent_id": "booking-api",
+  "events": [{
+    "event_time": "2026-09-19T04:00:00Z",
+    "service": "easytravel-business-backend",
+    "transaction_id": "B12345",
+    "session_id": "S7788",
+    "trace_id": "optional-trace-id",
+    "data": {
+      "event": "booking_confirmed",
+      "transaction_value": 12400,
+      "currency": "INR"
+    }
+  }]
+}
+```
+
+Only send business values whose meaning is defined by the application. SPARE-M must not infer revenue from an ambiguous numeric field.
+
+## RUM
+
+Serve:
+
+```html
+<script
+  src="https://YOUR-APP.vercel.app/sparem-rum.js"
+  data-endpoint="https://YOUR-APP.vercel.app"
+  data-key="YOUR_RUM_WRITE_TOKEN"
+  data-app="easytravel-web">
+</script>
+```
+
+The current browser agent collects page/navigation timing, selected user actions, JavaScript errors, fetch timing/status and session correlation. Query strings are removed before upload.
+
+## Data safety
+
+The ingestion layer masks common authorization/token/password/cookie patterns and limits payload size/depth. Database adapters normalize SQL by default. Browser URLs are stored without query strings.
+
+This is still a prototype security model. Before production add tenant isolation, authenticated UI/API sessions, per-source rate limits, retention policies, PII classification, audit logs and secret rotation.
