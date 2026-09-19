@@ -55,7 +55,9 @@ export function buildCoverageIntelligence({spans=[],infra={},journey={},traces=[
  const diskPerfAvailable=hasEvent('disk');
  const rumAvailable=hasEvent('rum');
  const changeAvailable=hasEvent('change');
- const profileAvailable=hasEvent('profile');
+ const profileEvents=(events||[]).filter(e=>String(e.type||'').toLowerCase()==='profile');
+ const profileAvailable=profileEvents.some(e=>['summary','execution_samples'].includes(String(e?.data?.analysis_level||''))||e?.data?.summary||e?.data?.execution_samples);
+ const profilePartial=profileEvents.length>0&&!profileAvailable;
  const k8sAvailable=hasEvent('kubernetes');
  const cloudAvailable=hasEvent('cloud');
  const databaseEvents=hasEvent('database');
@@ -97,7 +99,7 @@ export function buildCoverageIntelligence({spans=[],infra={},journey={},traces=[
   signal('journey_correlation','Journey/session correlation',journeyIds?95:Math.min(45,linkage),journeyIds?'available':linkage?'partial':'missing',journeyIds?'Journey/session correlation identifier observed':`No stable business journey/session id; transaction linkage confidence ${linkage}%`,['true conversion/drop-off','single-customer journey reconstruction']),
   signal('business_value','Business value context',transactionValue?95:0,transactionValue?'available':'missing',transactionValue?'Transaction value attribute observed':'No trusted transaction/order value attribute observed',['revenue/value-at-risk calculations']),
   signal('change_intelligence','Deployment/change context',changeAvailable?95:serviceVersion?45:0,changeAvailable?'available':serviceVersion?'partial':'missing',changeAvailable?'Deployment/configuration/change events are being ingested':serviceVersion?'Service version metadata exists; deployment/change events are still absent':'No deployment/version/change stream observed',['release-regression correlation','before/after version comparison']),
-  signal('profiles','Code profiling',profileAvailable?95:0,profileAvailable?'available':'missing',profileAvailable?'Profile/JFR evidence has been ingested':'No continuous or targeted profile signal is ingested',['method-level CPU/hot-path attribution']),
+  signal('profiles','Code profiling',profileAvailable?95:profilePartial?45:0,profileAvailable?'available':profilePartial?'partial':'missing',profileAvailable?'JFR/profile summary or execution-sample evidence has been ingested':profilePartial?'A profile artifact is known, but method-level evidence is not yet available':'No continuous or targeted profile signal is ingested',['method-level CPU/hot-path attribution']),
   signal('rum','Real-user/browser telemetry',rumAvailable?95:tech.browser?55:0,rumAvailable?'available':tech.browser?'partial':'missing',rumAvailable?'Browser/RUM events are being ingested':tech.browser?'Browser context detected but a complete RUM signal is not established':'No browser/RUM telemetry observed',['actual user actions','frontend errors','user-visible latency']),
   signal('network_telemetry','Network/TCP telemetry',networkAvailable?90:0,networkAvailable?'available':'missing',networkAvailable?'Network throughput/error/TCP counters are reporting':'No network counter stream is currently ingested',['network saturation and retransmission evidence']),
   signal('disk_performance','Disk performance',diskPerfAvailable?90:0,diskPerfAvailable?'available':'missing',diskPerfAvailable?'Disk IOPS/throughput/latency counters are reporting':'Only capacity utilization is available; disk performance counters are missing',['I/O bottleneck discrimination']),
