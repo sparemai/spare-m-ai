@@ -4,8 +4,10 @@ param(
  [Parameter(Mandatory=$true)][string]$IngestKey,
  [string]$AgentId=$env:COMPUTERNAME,
  [ValidateRange(15,600)][int]$IntervalSeconds=30,
- [string]$LogFiles=''
+ [string]$LogFiles='',
+ [string]$ProbeTargets='',
+ [string]$ConfigFiles=''
 )
 $script=Join-Path $PSScriptRoot 'sparem-extended-sensors.ps1'
 if(-not(Test-Path $script)){throw 'sparem-extended-sensors.ps1 missing'}
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -CloudUrl $CloudUrl -IngestKey $IngestKey -AgentId $AgentId -IntervalSeconds $IntervalSeconds -LogFiles $LogFiles
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -CloudUrl $CloudUrl -IngestKey $IngestKey -AgentId $AgentId -IntervalSeconds $IntervalSeconds -LogFiles $LogFiles -ProbeTargets $ProbeTargets -ConfigFiles $ConfigFiles
