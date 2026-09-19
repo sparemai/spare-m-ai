@@ -809,3 +809,30 @@ footer{padding:28px 0 10px;color:#465d6c;font-size:7px;text-align:center;letter-
 @media(max-width:780px){.coverageHeader{flex-direction:column}.coverageScore{width:100%;text-align:left}.categoryGrid{grid-template-columns:1fr 1fr}.signalMatrix{grid-template-columns:1fr}}
 
 .traceLogs{display:grid;gap:7px}.traceLog{padding:11px 12px;border:1px solid #243440;border-radius:10px;background:#09141c}.traceLog>div{display:flex;align-items:center;gap:8px}.traceLog>div>span{color:#6e8492;font-size:7px}.traceLog p{margin:7px 0 0;color:#c4ced5;font-size:8px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.traceLog small{display:block;margin-top:6px;color:#566d7b;font-size:6px}
+
+
+/* Runtime evidence */
+.deepTelemetry{
+ margin:16px 0;
+ padding:24px;
+ border:1px solid #22313f;
+ border-radius:var(--radius);
+ background:linear-gradient(180deg,rgba(13,21,30,.98),rgba(8,14,21,.98));
+ box-shadow:var(--shadow)
+}
+.telemetryTiles{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.telemetryTiles article{
+ min-width:0;padding:14px;border:1px solid #20303d;border-radius:11px;background:#09141d
+}
+.telemetryTiles span,.telemetryTiles b,.telemetryTiles small{display:block}
+.telemetryTiles span{font-size:7px;color:#6b8291;text-transform:uppercase;letter-spacing:.08em;font-weight:800}
+.telemetryTiles b{margin-top:7px;font-size:17px;letter-spacing:-.03em}
+.telemetryTiles small{margin-top:6px;color:#718795;font-size:7px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recentEvidence{margin-top:12px;padding-top:12px;border-top:1px solid #1c2b37}
+.recentEvidence>span{display:block;margin-bottom:7px;color:#6d8493;font-size:7px;font-weight:850;letter-spacing:.12em}
+.recentEvidence>div{display:grid;grid-template-columns:auto 160px 1fr;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #172631}
+.recentEvidence>div:last-child{border-bottom:0}
+.recentEvidence b{font-size:8px;color:#c5d0d7}
+.recentEvidence p{margin:0;color:#8799a4;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:1220px){.telemetryTiles{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:780px){.telemetryTiles{grid-template-columns:1fr 1fr}.recentEvidence>div{grid-template-columns:auto 1fr}.recentEvidence p{grid-column:1/3;white-space:normal}}
