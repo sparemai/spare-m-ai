@@ -39,7 +39,10 @@ const SAFE_SPAN_KEYS = new Set([
   'http.request.method','http.response.status_code','http.route','url.path','server.address','server.port',
   'network.protocol.version','db.system.name','db.namespace','db.operation.name','db.query.summary',
   'rpc.system','rpc.method','messaging.system','error.type','code.function.name','code.namespace',
-  'sparem.business.journey','sparem.business.step','sparem.business.outcome'
+  'sparem.business.journey','sparem.business.step','sparem.business.outcome',
+  'sparem.journey.id','sparem.session.id','session.id','enduser.session.id',
+  'sparem.transaction.id','sparem.transaction.value','sparem.transaction.currency',
+  'business.transaction.value','order.id','order.value','cart.value'
 ]);
 const SAFE_RESOURCE_KEYS = new Set(['service.name','service.version','deployment.environment.name','host.name','os.type','sparem.agent.id']);
 export function sanitizeSpan(s){
