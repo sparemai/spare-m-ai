@@ -117,6 +117,6 @@ export async function POST(req){
    input=[...input,...response.output,...outputs];
   }
   let result;try{result=JSON.parse(response?.output_text||'{}')}catch{result={summary:response?.output_text||'Investigation incomplete',business_assessment:'',technical_assessment:'',infrastructure_assessment:'',leading_hypothesis:'Insufficient evidence',confidence:0,evidence_for:[],evidence_against:[],next_actions:[],evidence_gaps:[]};}
-  return Response.json({agent_id:agent,range:rangeKey,stage,question,context,agentic:true,model,tools_used:[...new Set(used)],response:result,deterministic_leading_hypothesis:intel.evidence.leading_hypothesis,coverage:intel.coverage,telemetry,capabilities:intel.capabilities});
+  return Response.json({agent_id:agent,range:rangeKey,stage,question,context,agentic:true,model,tools_used:[...new Set(used)],response:result,deterministic_leading_hypothesis:intel.evidence.leading_hypothesis,coverage:intel.coverage,telemetry,extended_telemetry:summarizeExtended(events,'all'),capabilities:intel.capabilities});
  }catch(e){console.error(e);return Response.json({error:e?.message||'investigation failed'},{status:500});}
 }
