@@ -39,14 +39,38 @@ function stageTraceCounts(spans){
  return Object.fromEntries(JOURNEY_ORDER.map(x=>[x,sets[x].size]));
 }
 
-function buildBusinessContext(spans,journey){
- const counts=stageTraceCounts(spans),started=counts.Search||0,confirmed=counts.Confirm||0,payments=counts.Payment||0,booked=counts.Book||0;
+function buildBusinessContext(spans,journey,events=[]){
+ const counts=stageTraceCounts(spans),traceStarted=counts.Search||0,traceConfirmed=counts.Confirm||0,tracePayments=counts.Payment||0,traceBooked=counts.Book||0;
+ const business=(events||[]).filter(e=>e.type==='business');
+ const eventName=e=>String(e?.data?.event||e?.data?.name||e?.data?.kind||'').toLowerCase();
+ const uniqueCount=(rows)=>{const ids=new Set(rows.map(e=>e.transaction_id||e.session_id).filter(Boolean));return ids.size||rows.length;};
+ const confirmedEvents=business.filter(e=>/booking.*confirm|confirm.*booking|booking_completed|order_completed|purchase/.test(eventName(e)));
+ const paymentEvents=business.filter(e=>/payment.*attempt|payment_started|payment_submitted/.test(eventName(e)));
+ const bookingEvents=business.filter(e=>/booking.*start|booking_started|booking_review|book/.test(eventName(e))&&!confirmedEvents.includes(e));
+ const startedEvents=business.filter(e=>/journey.*start|search|booking_started/.test(eventName(e)));
+ const valueOf=e=>{for(const k of ['transaction_value','booking_value','revenue','value','amount']){const v=Number(e?.data?.[k]);if(Number.isFinite(v))return v;}return null;};
+ const valuedConfirmed=confirmedEvents.map(e=>({e,v:valueOf(e)})).filter(x=>x.v!==null);
+ const totalValue=valuedConfirmed.length?round1(valuedConfirmed.reduce((s,x)=>s+x.v,0)):null;
+ const currencies=[...new Set(valuedConfirmed.map(x=>x.e?.data?.currency).filter(Boolean).map(String))];
+ const trusted=business.length>0;
+ const started=trusted&&startedEvents.length?uniqueCount(startedEvents):traceStarted;
+ const confirmed=trusted&&confirmedEvents.length?uniqueCount(confirmedEvents):traceConfirmed;
+ const payments=trusted&&paymentEvents.length?uniqueCount(paymentEvents):tracePayments;
+ const booked=trusted&&bookingEvents.length?uniqueCount(bookingEvents):traceBooked;
  return {
-  journey:'Booking',measurement:'sampled_trace_proxy',confidence:Number(journey?.confidence||0),
-  bookings_observed:confirmed,payment_attempts_observed:payments,booking_reviews_observed:booked,journeys_started_observed:started,
+  journey:'Booking',
+  measurement:trusted?'business_events':'sampled_trace_proxy',
+  confidence:trusted?95:Number(journey?.confidence||0),
+  trusted_business_events:business.length,
+  bookings_observed:confirmed,
+  payment_attempts_observed:payments,
+  booking_reviews_observed:booked,
+  journeys_started_observed:started,
   completion_proxy_pct:started?round1(confirmed*100/started):null,
+  transaction_value_observed:totalValue,
+  currency:currencies.length===1?currencies[0]:null,
   stages:JOURNEY_ORDER.map(name=>{const s=journey?.stages?.find(x=>x.name===name)||{};return {name,trace_count:counts[name]||0,p95_ms:Number(s.p95_ms||0),error_rate:Number(s.error_rate||0),observed:Boolean(s.observed)};}),
-  note:'Counts are trace-observed journey activity at the current sampling rate. They become true business counts when a stable journey/transaction identifier or business event feed is available.'
+  note:trusted?'Business counts use trusted application business events when available; technical stage timing still comes from sampled traces.':'Counts are trace-observed journey activity at the current sampling rate. They become true business counts when a stable journey/transaction identifier or business event feed is available.'
  };
 }
 
@@ -141,7 +165,7 @@ export async function GET(req){
    sql`SELECT trace_id,span_id,parent_span_id,service,operation,kind,start_time,duration_ms,status_code,status_message,attrs,resource FROM spans WHERE agent_id=${agent} AND start_time>=${previousFrom} AND start_time<${cutoff} ORDER BY start_time DESC LIMIT 50000`,
    sql`SELECT type,event_time,agent_id,hostname,service,entity_id,trace_id,span_id,session_id,transaction_id,data FROM telemetry_events WHERE agent_id=${agent} AND event_time>=${cutoff} ORDER BY event_time DESC LIMIT 20000`
   ]);
-  const journey=buildJourney(allSpans),previousJourneyAll=buildJourney(previousAllSpans),business_context=buildBusinessContext(allSpans,journey),http_health=buildHttpHealth(allSpans);
+  const journey=buildJourney(allSpans),previousJourneyAll=buildJourney(previousAllSpans),business_context=buildBusinessContext(allSpans,journey,events),http_health=buildHttpHealth(allSpans);
   const spans=filterByStage(allSpans,selectedStage),previousSpans=filterByStage(previousAllSpans,selectedStage),focusedJourney=selectedStage==='All'?journey:buildJourney(spans),previousFocusedJourney=selectedStage==='All'?previousJourneyAll:buildJourney(previousSpans);
   const technical=buildTechnical(spans),previousTechnical=buildTechnical(previousSpans),infra=buildInfra(hosts),correlation=buildCorrelation(spans,hosts,rangeMinutes),evidence=summarizeEvidence(focusedJourney,technical,infra,correlation),intelligence=buildIntelligence({spans,previousSpans,infra,correlation,events});
   const application_view=buildApplicationView(allSpans,infra,buildTechnical(allSpans),http_health),traces=summarizeTraces(spans),recent_traces=[...traces].sort((a,b)=>Number(b.error)-Number(a.error)||b.duration_ms-a.duration_ms||new Date(b.start_time)-new Date(a.start_time)).slice(0,30);
