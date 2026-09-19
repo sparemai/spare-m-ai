@@ -48,10 +48,13 @@ function buildBusinessContext(spans,journey,events=[]){
  const paymentEvents=business.filter(e=>/payment.*attempt|payment_started|payment_submitted/.test(eventName(e)));
  const bookingEvents=business.filter(e=>/booking.*start|booking_started|booking_review|book/.test(eventName(e))&&!confirmedEvents.includes(e));
  const startedEvents=business.filter(e=>/journey.*start|search|booking_started/.test(eventName(e)));
- const valueOf=e=>{for(const k of ['transaction_value','booking_value','revenue','value','amount']){const v=Number(e?.data?.[k]);if(Number.isFinite(v))return v;}return null;};
+ const valueOf=e=>{for(const k of ['transaction_value','booking_value','value','amount']){const v=Number(e?.data?.[k]);if(Number.isFinite(v))return v;}return null;};
+ const revenueOf=e=>{const v=Number(e?.data?.revenue);return Number.isFinite(v)?v:null;};
  const valuedConfirmed=confirmedEvents.map(e=>({e,v:valueOf(e)})).filter(x=>x.v!==null);
+ const revenueConfirmed=confirmedEvents.map(e=>({e,v:revenueOf(e)})).filter(x=>x.v!==null);
  const totalValue=valuedConfirmed.length?round1(valuedConfirmed.reduce((s,x)=>s+x.v,0)):null;
- const currencies=[...new Set(valuedConfirmed.map(x=>x.e?.data?.currency).filter(Boolean).map(String))];
+ const totalRevenue=revenueConfirmed.length?round1(revenueConfirmed.reduce((s,x)=>s+x.v,0)):null;
+ const currencies=[...new Set([...valuedConfirmed,...revenueConfirmed].map(x=>x.e?.data?.currency).filter(Boolean).map(String))];
  const trusted=business.length>0;
  const started=trusted&&startedEvents.length?uniqueCount(startedEvents):traceStarted;
  const confirmed=trusted&&confirmedEvents.length?uniqueCount(confirmedEvents):traceConfirmed;
@@ -68,6 +71,7 @@ function buildBusinessContext(spans,journey,events=[]){
   journeys_started_observed:started,
   completion_proxy_pct:started?round1(confirmed*100/started):null,
   transaction_value_observed:totalValue,
+  revenue_observed:totalRevenue,
   currency:currencies.length===1?currencies[0]:null,
   stages:JOURNEY_ORDER.map(name=>{const s=journey?.stages?.find(x=>x.name===name)||{};return {name,trace_count:counts[name]||0,p95_ms:Number(s.p95_ms||0),error_rate:Number(s.error_rate||0),observed:Boolean(s.observed)};}),
   note:trusted?'Business counts use trusted application business events when available; technical stage timing still comes from sampled traces.':'Counts are trace-observed journey activity at the current sampling rate. They become true business counts when a stable journey/transaction identifier or business event feed is available.'
