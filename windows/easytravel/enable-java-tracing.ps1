@@ -5,7 +5,9 @@ param(
  [string]$EasyTravelDir='',
  [string]$JavaAgentJar='C:\ProgramData\SPARE-M-AI\opentelemetry-javaagent.jar',
  [string]$AgentId=$env:COMPUTERNAME,
- [ValidateRange(0.001,1.0)][double]$SamplingRatio=0.05
+ [ValidateRange(0.001,1.0)][double]$SamplingRatio=0.05,
+ [bool]$EnableMetrics=$true,
+ [bool]$EnableLogs=$true
 )
 $ErrorActionPreference='Stop'
 function Find-EasyTravel{
@@ -17,6 +19,8 @@ if(-not(Test-Path $JavaAgentJar)){throw "Java agent missing: $JavaAgentJar"}
 $config=Join-Path $EasyTravelDir 'resources\easyTravelConfig.properties';if(-not(Test-Path $config)){throw "Config missing: $config"}
 $stamp=Get-Date -Format 'yyyyMMdd-HHmmss';$backup="$config.sparem-backup-$stamp";Copy-Item $config $backup -Force
 $traceEndpoint=$CloudUrl.TrimEnd('/')+'/api/otlp/v1/traces'
+$metricEndpoint=$CloudUrl.TrimEnd('/')+'/api/otlp/v1/metrics'
+$logEndpoint=$CloudUrl.TrimEnd('/')+'/api/otlp/v1/logs'
 function Set-Opts([string[]]$lines,[string]$key,[string]$service){
  $prefix="$key=";$found=$false;$out=@()
  foreach($line in $lines){
@@ -24,13 +28,25 @@ function Set-Opts([string[]]$lines,[string]$key,[string]$service){
    $found=$true;$existing=$line.Substring($prefix.Length)
    $parts=@($existing -split ',' | Where-Object {$_ -and $_ -notmatch '^-javaagent:.*opentelemetry-javaagent\.jar' -and $_ -notmatch '^-Dotel\.'})
    # easyTravel uses commas to delimit JVM options. Keep resource attributes to one comma-free value.
-   $otel=@("-javaagent:$JavaAgentJar","-Dotel.service.name=$service","-Dotel.resource.attributes=sparem.agent.id=$AgentId","-Dotel.exporter.otlp.traces.endpoint=$traceEndpoint",'-Dotel.exporter.otlp.traces.protocol=http/protobuf',"-Dotel.exporter.otlp.headers=x-sparem-key=$IngestKey",'-Dotel.metrics.exporter=none','-Dotel.logs.exporter=none','-Dotel.traces.sampler=parentbased_traceidratio',"-Dotel.traces.sampler.arg=$SamplingRatio",'-Dotel.bsp.max.export.batch.size=256','-Dotel.bsp.schedule.delay=5000','-Dotel.span.attribute.count.limit=64','-Dotel.span.event.count.limit=16','-Dotel.javaagent.logging=none')
+   $otel=@("-javaagent:$JavaAgentJar","-Dotel.service.name=$service","-Dotel.resource.attributes=sparem.agent.id=$AgentId","-Dotel.exporter.otlp.traces.endpoint=$traceEndpoint",'-Dotel.exporter.otlp.traces.protocol=http/protobuf',"-Dotel.exporter.otlp.headers=x-sparem-key=$IngestKey",'-Dotel.traces.sampler=parentbased_traceidratio',"-Dotel.traces.sampler.arg=$SamplingRatio",'-Dotel.bsp.max.export.batch.size=256','-Dotel.bsp.schedule.delay=5000','-Dotel.span.attribute.count.limit=64','-Dotel.span.event.count.limit=16','-Dotel.javaagent.logging=none')
+   if($EnableMetrics){$otel+=@('-Dotel.metrics.exporter=otlp',"-Dotel.exporter.otlp.metrics.endpoint=$metricEndpoint",'-Dotel.exporter.otlp.metrics.protocol=http/protobuf','-Dotel.metric.export.interval=30000')}else{$otel+='-Dotel.metrics.exporter=none'}
+   if($EnableLogs){$otel+=@('-Dotel.logs.exporter=otlp',"-Dotel.exporter.otlp.logs.endpoint=$logEndpoint",'-Dotel.exporter.otlp.logs.protocol=http/protobuf')}else{$otel+='-Dotel.logs.exporter=none'}
    $out += $prefix+(($parts+$otel)-join ',')
   }else{$out+=$line}
  }
- if(-not $found){$out += $prefix+(@("-javaagent:$JavaAgentJar","-Dotel.service.name=$service","-Dotel.resource.attributes=sparem.agent.id=$AgentId","-Dotel.exporter.otlp.traces.endpoint=$traceEndpoint",'-Dotel.exporter.otlp.traces.protocol=http/protobuf',"-Dotel.exporter.otlp.headers=x-sparem-key=$IngestKey",'-Dotel.metrics.exporter=none','-Dotel.logs.exporter=none','-Dotel.traces.sampler=parentbased_traceidratio',"-Dotel.traces.sampler.arg=$SamplingRatio",'-Dotel.bsp.max.export.batch.size=256','-Dotel.bsp.schedule.delay=5000','-Dotel.span.attribute.count.limit=64','-Dotel.span.event.count.limit=16','-Dotel.javaagent.logging=none')-join ',')}
+ if(-not $found){
+  $otel=@("-javaagent:$JavaAgentJar","-Dotel.service.name=$service","-Dotel.resource.attributes=sparem.agent.id=$AgentId","-Dotel.exporter.otlp.traces.endpoint=$traceEndpoint",'-Dotel.exporter.otlp.traces.protocol=http/protobuf',"-Dotel.exporter.otlp.headers=x-sparem-key=$IngestKey",'-Dotel.traces.sampler=parentbased_traceidratio',"-Dotel.traces.sampler.arg=$SamplingRatio",'-Dotel.bsp.max.export.batch.size=256','-Dotel.bsp.schedule.delay=5000','-Dotel.span.attribute.count.limit=64','-Dotel.span.event.count.limit=16','-Dotel.javaagent.logging=none')
+  if($EnableMetrics){$otel+=@('-Dotel.metrics.exporter=otlp',"-Dotel.exporter.otlp.metrics.endpoint=$metricEndpoint",'-Dotel.exporter.otlp.metrics.protocol=http/protobuf','-Dotel.metric.export.interval=30000')}else{$otel+='-Dotel.metrics.exporter=none'}
+  if($EnableLogs){$otel+=@('-Dotel.logs.exporter=otlp',"-Dotel.exporter.otlp.logs.endpoint=$logEndpoint",'-Dotel.exporter.otlp.logs.protocol=http/protobuf')}else{$otel+='-Dotel.logs.exporter=none'}
+  $out += $prefix+($otel-join ',')
+ }
  return ,$out
 }
 $lines=Get-Content $config;$lines=Set-Opts $lines 'config.frontendJavaopts' 'easytravel-customer-frontend';$lines=Set-Opts $lines 'config.backendJavaopts' 'easytravel-business-backend';Set-Content $config $lines -Encoding ASCII
 Write-Host 'Enabled targeted EasyTravel Java bytecode tracing directly to Vercel.' -ForegroundColor Green
-Write-Host "Endpoint: $traceEndpoint";Write-Host "Sampling: $SamplingRatio";Write-Host "Backup: $backup";Write-Host 'Restart the EasyTravel scenario. Launcher/weblauncher were not instrumented.'
+Write-Host "Trace endpoint: $traceEndpoint"
+Write-Host "Metric endpoint: $metricEndpoint (enabled=$EnableMetrics)"
+Write-Host "Log endpoint: $logEndpoint (enabled=$EnableLogs)"
+Write-Host "Trace sampling: $SamplingRatio"
+Write-Host "Backup: $backup"
+Write-Host 'Restart the EasyTravel scenario. Launcher/weblauncher were not instrumented.'
