@@ -81,6 +81,34 @@ function buildApplicationView(spans,infra,technical,http){
 
 function stageForView(journey,stage){if(stage!=='All')return journey?.stages?.find(s=>s.name===stage)||null;return journey?.primary_leak||journey?.stages?.find(s=>s.observed)||null;}
 
+function buildExtendedTelemetryView(events){
+ const counts={};for(const e of events||[])counts[e.type]=(counts[e.type]||0)+1;
+ const latest=(type,n=8)=>(events||[]).filter(e=>e.type===type).slice(0,n).map(e=>({time:e.event_time,service:e.service,entity_id:e.entity_id,trace_id:e.trace_id,session_id:e.session_id,transaction_id:e.transaction_id,data:e.data}));
+ const latestPer=(type,keyFn)=>{
+  const m=new Map();
+  for(const e of (events||[]).filter(e=>e.type===type)){const k=keyFn(e);if(k&&!m.has(k))m.set(k,e);}
+  return [...m.values()];
+ };
+ const processes=latestPer('process',e=>e.entity_id||e.data?.pid).sort((a,b)=>Number(b.data?.cpu_pct||0)-Number(a.data?.cpu_pct||0)).slice(0,10).map(e=>({time:e.event_time,pid:e.data?.pid,process:e.data?.process_name,service:e.service,cpu_pct:Number(e.data?.cpu_pct||0),memory_bytes:Number(e.data?.memory_bytes||0),threads:Number(e.data?.threads||0)}));
+ const runtime=latestPer('runtime',e=>`${e.service||''}|${e.data?.metric||''}|${JSON.stringify(e.data?.attributes||{})}`).slice(0,16).map(e=>({time:e.event_time,service:e.service,metric:e.data?.metric,value:e.data?.value,count:e.data?.count,sum:e.data?.sum,unit:e.data?.unit,attributes:e.data?.attributes||{}}));
+ const logs=(events||[]).filter(e=>e.type==='logs'),errorLogs=logs.filter(e=>/error|fatal/i.test(String(e.data?.severity||''))),warnLogs=logs.filter(e=>/warn/i.test(String(e.data?.severity||'')));
+ return {
+  counts,
+  processes,
+  runtime,
+  logs:{total:logs.length,errors:errorLogs.length,warnings:warnLogs.length,recent:[...errorLogs,...warnLogs].sort((a,b)=>new Date(b.event_time)-new Date(a.event_time)).slice(0,8).map(e=>({time:e.event_time,service:e.service,severity:e.data?.severity,message:e.data?.message,trace_id:e.trace_id}))},
+  network:latest('network',8),
+  disk:latest('disk',8),
+  changes:latest('change',8),
+  business:latest('business',8),
+  rum:latest('rum',8),
+  database:latest('database',8),
+  kubernetes:latest('kubernetes',8),
+  cloud:latest('cloud',8),
+  profiles:latest('profile',8)
+ };
+}
+
 function buildExecutive({stage,currentJourney,previousJourney,currentTechnical,previousTechnical,currentInfra,previousHosts,correlation,traces,intelligence,business,http}){
  const cur=stageForView(currentJourney,stage),base=cur?previousJourney?.stages?.find(s=>s.name===cur.name):null;
  const traceDominant=intelligence?.traces?.[0]?.dominant_contributor;
@@ -118,7 +146,7 @@ export async function GET(req){
   const technical=buildTechnical(spans),previousTechnical=buildTechnical(previousSpans),infra=buildInfra(hosts),correlation=buildCorrelation(spans,hosts,rangeMinutes),evidence=summarizeEvidence(focusedJourney,technical,infra,correlation),intelligence=buildIntelligence({spans,previousSpans,infra,correlation,events});
   const application_view=buildApplicationView(allSpans,infra,buildTechnical(allSpans),http_health),traces=summarizeTraces(spans),recent_traces=[...traces].sort((a,b)=>Number(b.error)-Number(a.error)||b.duration_ms-a.duration_ms||new Date(b.start_time)-new Date(a.start_time)).slice(0,30);
   const executive=buildExecutive({stage:selectedStage,currentJourney:focusedJourney,previousJourney:previousFocusedJourney,currentTechnical:technical,previousTechnical,currentInfra:infra,previousHosts,correlation,traces,intelligence,business:business_context,http:http_health});
-  const extended_telemetry={total:events.length,counts:Object.fromEntries([...events.reduce((m,e)=>m.set(e.type,(m.get(e.type)||0)+1),new Map())])};
+  const extended_telemetry={total:events.length,...buildExtendedTelemetryView(events)};
   return Response.json({agent_id:agent,filters:{range:rangeKey,range_minutes:rangeMinutes,journey:'Booking',stage:selectedStage,from:cutoff,to,baseline_from:previousFrom,baseline_to:cutoff},executive,business_context,http_health,application_view,intelligence,extended_telemetry,journey,focused_journey:focusedJourney,technical,infra,correlation,evidence,recent_traces,updated_at:new Date().toISOString()});
  }catch(e){console.error(e);return Response.json({error:e?.message||'overview failed'},{status:500});}
 }
