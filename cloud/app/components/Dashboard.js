@@ -8,6 +8,7 @@ const ms=v=>Number(v||0)>=1000?`${(Number(v||0)/1000).toFixed(2)} s`:`${Math.rou
 const pct=v=>v===null||v===undefined?'—':`${Number(v).toFixed(1)}%`;
 const when=v=>v?new Date(v).toLocaleString([], {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
 const nice=v=>String(v||'Unknown').replace(/^easytravel-/,'').replaceAll('-',' ').replace(/\b\w/g,c=>c.toUpperCase());
+const bytes=v=>{const n=Number(v||0);if(n>=1073741824)return `${(n/1073741824).toFixed(1)} GB`;if(n>=1048576)return `${(n/1048576).toFixed(1)} MB`;if(n>=1024)return `${(n/1024).toFixed(1)} KB`;return `${Math.round(n)} B`;};
 
 function Pill({children,t='neutral'}){return <span className={`pill ${t}`}>{children}</span>}
 function tone(status){return status==='HEALTHY'?'good':status==='WATCH'?'watch':'bad'}
@@ -60,6 +61,24 @@ function TelemetryCoverage({data}){
   <div className="coverageHeader"><div><span>TELEMETRY & UNDERSTANDING</span><h2>What SPARE-M can see right now</h2><p>Supported features become evidence only when a real signal is reporting. This view separates live telemetry from gaps.</p></div><div className="coverageScore"><b>{c.understanding_score}%</b><span>understanding</span></div></div>
   <div className="categoryGrid">{categories.map(([name,value])=><div key={name}><span>{name}</span><b>{value??0}%</b><i><em style={{width:`${Math.max(0,Math.min(100,Number(value||0)))}%`}}/></i></div>)}</div>
   <div className="signalMatrix">{(c.signals||[]).map(s=><div className={`signalItem ${s.status}`} key={s.id}><div><span>{s.label}</span><small>{s.evidence}</small></div><b>{statusText(s.status)}</b></div>)}</div>
+ </section>
+}
+
+function TelemetryDetails({data}){
+ const t=data?.extended_telemetry||{},p=t.processes||[],r=t.runtime||[],l=t.logs||{},n=t.network||[],d=t.disk||[],changes=t.changes||[];
+ const active=(t.total||0)>0;
+ const latestNetwork=n[0]?.data||{},latestDisk=d[0]?.data||{};
+ return <section className="deepTelemetry">
+  <div className="sectionTitle"><div><span>LIVE TECHNICAL SIGNALS</span><h2>Runtime evidence</h2><p>Low-level signals that strengthen root-cause analysis when they are available.</p></div><Pill t={active?'good':'watch'}>{active?(t.total+' events'):'Waiting for signals'}</Pill></div>
+  <div className="telemetryTiles">
+   <article><span>Processes</span><b>{p.length?p.length:'—'}</b><small>{p[0]?((p[0].process||'process')+' • CPU '+pct(p[0].cpu_pct)+' • '+bytes(p[0].memory_bytes)):'Start extended Windows sensors'}</small></article>
+   <article><span>JVM / Runtime</span><b>{r.length?r.length:'—'}</b><small>{r[0]?((r[0].metric||'runtime metric')+(r[0].value!==undefined?(' • '+r[0].value+' '+(r[0].unit||'')):'')):'Enable OTLP metrics on Java agent'}</small></article>
+   <article><span>Application logs</span><b>{l.total??0}</b><small>{l.errors||0} errors • {l.warnings||0} warnings</small></article>
+   <article><span>Network / TCP</span><b>{n.length?'Live':'—'}</b><small>{n.length?('RX '+bytes(latestNetwork.rx_bytes_per_sec||0)+'/s • TX '+bytes(latestNetwork.tx_bytes_per_sec||0)+'/s'):'No network counters yet'}</small></article>
+   <article><span>Disk performance</span><b>{d.length?'Live':'—'}</b><small>{d.length?('Read '+Number(latestDisk.read_iops||0).toFixed(1)+' IOPS • Write '+Number(latestDisk.write_iops||0).toFixed(1)+' IOPS'):'No disk performance counters yet'}</small></article>
+   <article><span>Change events</span><b>{changes.length||'—'}</b><small>{changes[0]?((changes[0].data?.kind||'change')+' • '+when(changes[0].time)):'Connect GitHub / CI-CD events'}</small></article>
+  </div>
+  {l.recent?.length>0&&<div className="recentEvidence"><span>RECENT LOG EVIDENCE</span>{l.recent.slice(0,5).map((x,i)=><div key={i}><Pill t={/error|fatal/i.test(String(x.severity||''))?'bad':'watch'}>{x.severity||'LOG'}</Pill><b>{nice(x.service||'Unknown')}</b><p>{x.message}</p></div>)}</div>}
  </section>
 }
 
@@ -133,5 +152,5 @@ export default function Dashboard(){
    setCopilot(j);
   }catch(e){setCopilot({agentic:false,reason:e.message})}finally{setCopilotLoading(false)}
  }
- return <main><Header data={data} range={range} setRange={setRange} stage={stage} setStage={setStage} refresh={load} loading={loading}/>{err&&<div className="errorBanner">{err}</div>}<Hero data={data} onAI={analyze} aiLoading={aiLoading} ai={ai}/><AskSpareM data={data} question={question} setQuestion={setQuestion} onAsk={askSpareM} loading={copilotLoading} result={copilot}/><KPIs data={data}/><TelemetryCoverage data={data}/><BusinessFlow data={data}/><div className="twoCol"><ApplicationMap data={data}/><FixPanel data={data}/></div><ServiceHealth data={data}/><RequestHealth data={data}/><Traces data={data} onOpen={openTrace}/><footer>SPARE-M • Business value → technical health → what to fix</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
+ return <main><Header data={data} range={range} setRange={setRange} stage={stage} setStage={setStage} refresh={load} loading={loading}/>{err&&<div className="errorBanner">{err}</div>}<Hero data={data} onAI={analyze} aiLoading={aiLoading} ai={ai}/><AskSpareM data={data} question={question} setQuestion={setQuestion} onAsk={askSpareM} loading={copilotLoading} result={copilot}/><KPIs data={data}/><TelemetryCoverage data={data}/><TelemetryDetails data={data}/><BusinessFlow data={data}/><div className="twoCol"><ApplicationMap data={data}/><FixPanel data={data}/></div><ServiceHealth data={data}/><RequestHealth data={data}/><Traces data={data} onOpen={openTrace}/><footer>SPARE-M • Business value → technical health → what to fix</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
 }
