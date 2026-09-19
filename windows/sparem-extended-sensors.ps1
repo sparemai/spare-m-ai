@@ -160,7 +160,7 @@ function Check-ConfigChanges{
    if($configHashes[$file] -ne $hash){
     $old=$configHashes[$file];$configHashes[$file]=$hash
     $out+=@{
-     event_time=(Get-Date).ToUniversalTime().ToString('o');agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id=$file
+     event_time=(Get-Date).ToUniversalTime().ToString('o');agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id=[IO.Path]::GetFileName($file)
      data=@{kind='configuration_change';file=[IO.Path]::GetFileName($file);old_sha256=$old;new_sha256=$hash;last_write_utc=$item.LastWriteTimeUtc.ToString('o')}
     }
    }
