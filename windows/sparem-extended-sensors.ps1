@@ -6,6 +6,7 @@ param(
  [ValidateRange(15,600)][int]$IntervalSeconds=30,
  [string]$LogFiles='',
  [string]$ProbeTargets='',
+ [string]$ConfigFiles='',
  [bool]$EnableProcess=$true,
  [bool]$EnableNetwork=$true,
  [bool]$EnableDisk=$true,
@@ -16,6 +17,7 @@ $ErrorActionPreference='Continue'
 $base=$CloudUrl.TrimEnd('/')
 $headers=@{'x-sparem-key'=$IngestKey}
 $logOffsets=@{}
+$configHashes=@{}
 
 function Mask-Log([string]$s){
  if($null -eq $s){return ''}
@@ -144,6 +146,28 @@ function Read-NewLogs{
  }
  return $out
 }
+function Check-ConfigChanges{
+ if([string]::IsNullOrWhiteSpace($ConfigFiles)){return @()}
+ $out=@()
+ foreach($file in ($ConfigFiles -split ';'|Where-Object {$_ -and (Test-Path $_)})){
+  try{
+   $hash=(Get-FileHash -Algorithm SHA256 -Path $file).Hash
+   $item=Get-Item $file
+   if(-not $configHashes.ContainsKey($file)){
+    $configHashes[$file]=$hash
+    continue
+   }
+   if($configHashes[$file] -ne $hash){
+    $old=$configHashes[$file];$configHashes[$file]=$hash
+    $out+=@{
+     event_time=(Get-Date).ToUniversalTime().ToString('o');agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id=$file
+     data=@{kind='configuration_change';file=[IO.Path]::GetFileName($file);path_hash=(Mask-Log ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($file))));old_sha256=$old;new_sha256=$hash;last_write_utc=$item.LastWriteTimeUtc.ToString('o')}
+    }
+   }
+  }catch{Write-Warning "config watch failed for $file : $($_.Exception.Message)"}
+ }
+ return $out
+}
 function Find-Jcmd{
  $cmd=Get-Command jcmd.exe -ErrorAction SilentlyContinue;if($cmd){return $cmd.Source}
  $c=@(
@@ -195,12 +219,14 @@ function Poll-Command{
 Write-Host "SPARE-M extended sensors started for $AgentId" -ForegroundColor Green
 Write-Host "Interval: ${IntervalSeconds}s; process=$EnableProcess network=$EnableNetwork disk=$EnableDisk logs=$EnableLogs commands=$EnableCommands"
 if($ProbeTargets){Write-Host "Active network probes: $ProbeTargets"}
+if($ConfigFiles){Write-Host "Configuration watch enabled for supplied file list."}
 while($true){
  $started=Get-Date
  if($EnableProcess){Send-Events 'process' (Collect-Processes)}
  if($EnableNetwork){Send-Events 'network' (Collect-Network);Send-Events 'network' (Collect-Probes)}
  if($EnableDisk){Send-Events 'disk' (Collect-Disk)}
  if($EnableLogs){Send-Events 'logs' (Read-NewLogs)}
+ Send-Events 'change' (Check-ConfigChanges)
  Poll-Command
  $elapsed=((Get-Date)-$started).TotalSeconds
  Start-Sleep -Seconds ([Math]::Max(1,$IntervalSeconds-[int]$elapsed))
