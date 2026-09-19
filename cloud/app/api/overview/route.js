@@ -1,6 +1,7 @@
 import {db} from '../../../lib/db';
 import {JOURNEY_ORDER,stageOf,buildJourney,buildTechnical,buildInfra,buildCorrelation,summarizeEvidence} from '../../../lib/analytics';
 import {buildIntelligence} from '../../../lib/intelligence';
+import {ensureExtendedSchema} from '../../../lib/telemetry';
 export const runtime='nodejs';
 
 const ranges={'15m':15,'1h':60,'6h':360,'24h':1440};
@@ -99,23 +100,25 @@ function buildExecutive({stage,currentJourney,previousJourney,currentTechnical,p
 
 export async function GET(req){
  try{
-  const sql=db(),u=new URL(req.url);let agent=u.searchParams.get('agent_id');
+  const sql=db(),u=new URL(req.url);await ensureExtendedSchema(sql);let agent=u.searchParams.get('agent_id');
   const rangeKey=ranges[u.searchParams.get('range')]?u.searchParams.get('range'):'15m',rangeMinutes=ranges[rangeKey];
   const legacy=u.searchParams.get('journey'),stageParam=u.searchParams.get('stage')||(JOURNEY_ORDER.includes(legacy)?legacy:'All'),selectedStage=JOURNEY_ORDER.includes(stageParam)?stageParam:'All';
   const now=Date.now(),cutoffMs=now-rangeMinutes*60000,previousFromMs=cutoffMs-rangeMinutes*60000,cutoff=new Date(cutoffMs).toISOString(),previousFrom=new Date(previousFromMs).toISOString(),to=new Date(now).toISOString();
   if(!agent){const r=await sql`SELECT agent_id FROM host_samples ORDER BY collected_at DESC LIMIT 1`;agent=r[0]?.agent_id;if(!agent){const s=await sql`SELECT agent_id FROM spans ORDER BY start_time DESC LIMIT 1`;agent=s[0]?.agent_id;}}
   if(!agent)return Response.json({agent_id:null,filters:{range:rangeKey,journey:'Booking',stage:selectedStage},executive:null,business_context:null,http_health:null,application_view:null,recent_traces:[]});
-  const [hosts,allSpans,previousHosts,previousAllSpans]=await Promise.all([
+  const [hosts,allSpans,previousHosts,previousAllSpans,events]=await Promise.all([
    sql`SELECT agent_id,hostname,collected_at,cpu,memory,uptime_seconds,disks FROM host_samples WHERE agent_id=${agent} AND collected_at>=${cutoff} ORDER BY collected_at DESC LIMIT 5000`,
    sql`SELECT trace_id,span_id,parent_span_id,service,operation,kind,start_time,duration_ms,status_code,status_message,attrs,resource FROM spans WHERE agent_id=${agent} AND start_time>=${cutoff} ORDER BY start_time DESC LIMIT 50000`,
    sql`SELECT agent_id,hostname,collected_at,cpu,memory,uptime_seconds,disks FROM host_samples WHERE agent_id=${agent} AND collected_at>=${previousFrom} AND collected_at<${cutoff} ORDER BY collected_at DESC LIMIT 5000`,
-   sql`SELECT trace_id,span_id,parent_span_id,service,operation,kind,start_time,duration_ms,status_code,status_message,attrs,resource FROM spans WHERE agent_id=${agent} AND start_time>=${previousFrom} AND start_time<${cutoff} ORDER BY start_time DESC LIMIT 50000`
+   sql`SELECT trace_id,span_id,parent_span_id,service,operation,kind,start_time,duration_ms,status_code,status_message,attrs,resource FROM spans WHERE agent_id=${agent} AND start_time>=${previousFrom} AND start_time<${cutoff} ORDER BY start_time DESC LIMIT 50000`,
+   sql`SELECT type,event_time,agent_id,hostname,service,entity_id,trace_id,span_id,session_id,transaction_id,data FROM telemetry_events WHERE agent_id=${agent} AND event_time>=${cutoff} ORDER BY event_time DESC LIMIT 20000`
   ]);
   const journey=buildJourney(allSpans),previousJourneyAll=buildJourney(previousAllSpans),business_context=buildBusinessContext(allSpans,journey),http_health=buildHttpHealth(allSpans);
   const spans=filterByStage(allSpans,selectedStage),previousSpans=filterByStage(previousAllSpans,selectedStage),focusedJourney=selectedStage==='All'?journey:buildJourney(spans),previousFocusedJourney=selectedStage==='All'?previousJourneyAll:buildJourney(previousSpans);
-  const technical=buildTechnical(spans),previousTechnical=buildTechnical(previousSpans),infra=buildInfra(hosts),correlation=buildCorrelation(spans,hosts,rangeMinutes),evidence=summarizeEvidence(focusedJourney,technical,infra,correlation),intelligence=buildIntelligence({spans,previousSpans,infra,correlation});
+  const technical=buildTechnical(spans),previousTechnical=buildTechnical(previousSpans),infra=buildInfra(hosts),correlation=buildCorrelation(spans,hosts,rangeMinutes),evidence=summarizeEvidence(focusedJourney,technical,infra,correlation),intelligence=buildIntelligence({spans,previousSpans,infra,correlation,events});
   const application_view=buildApplicationView(allSpans,infra,buildTechnical(allSpans),http_health),traces=summarizeTraces(spans),recent_traces=[...traces].sort((a,b)=>Number(b.error)-Number(a.error)||b.duration_ms-a.duration_ms||new Date(b.start_time)-new Date(a.start_time)).slice(0,30);
   const executive=buildExecutive({stage:selectedStage,currentJourney:focusedJourney,previousJourney:previousFocusedJourney,currentTechnical:technical,previousTechnical,currentInfra:infra,previousHosts,correlation,traces,intelligence,business:business_context,http:http_health});
-  return Response.json({agent_id:agent,filters:{range:rangeKey,range_minutes:rangeMinutes,journey:'Booking',stage:selectedStage,from:cutoff,to,baseline_from:previousFrom,baseline_to:cutoff},executive,business_context,http_health,application_view,intelligence,journey,focused_journey:focusedJourney,technical,infra,correlation,evidence,recent_traces,updated_at:new Date().toISOString()});
+  const extended_telemetry={total:events.length,counts:Object.fromEntries([...events.reduce((m,e)=>m.set(e.type,(m.get(e.type)||0)+1),new Map())])};
+  return Response.json({agent_id:agent,filters:{range:rangeKey,range_minutes:rangeMinutes,journey:'Booking',stage:selectedStage,from:cutoff,to,baseline_from:previousFrom,baseline_to:cutoff},executive,business_context,http_health,application_view,intelligence,extended_telemetry,journey,focused_journey:focusedJourney,technical,infra,correlation,evidence,recent_traces,updated_at:new Date().toISOString()});
  }catch(e){console.error(e);return Response.json({error:e?.message||'overview failed'},{status:500});}
 }
