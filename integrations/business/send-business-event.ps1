@@ -9,12 +9,14 @@ param(
  [string]$SessionId='',
  [string]$TraceId='',
  [Nullable[double]]$Value=$null,
+ [Nullable[double]]$Revenue=$null,
  [string]$Currency='',
  [string]$Outcome=''
 )
 $ErrorActionPreference='Stop'
 $data=@{event=$Event}
 if($null -ne $Value){$data.transaction_value=[double]$Value}
+if($null -ne $Revenue){$data.revenue=[double]$Revenue}
 if($Currency){$data.currency=$Currency}
 if($Outcome){$data.outcome=$Outcome}
 $event=@{
