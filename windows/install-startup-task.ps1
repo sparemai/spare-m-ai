@@ -5,7 +5,9 @@ param(
  [string]$AgentId=$env:COMPUTERNAME,
  [int]$IntervalSeconds=30,
  [bool]$InstallExtended=$true,
- [string]$LogFiles=''
+ [string]$LogFiles='',
+ [string]$ProbeTargets='',
+ [string]$ConfigFiles=''
 )
 $ErrorActionPreference='Stop'
 $exe=Join-Path $PSScriptRoot 'sparem-collector.exe'
