@@ -16,7 +16,7 @@ function Header({data,range,setRange,stage,setStage,refresh,loading}){
  return <>
   <header className="nav">
    <div className="brand"><div className="brandMark">M</div><div><b>SPARE-M</b><span>Business Reliability Intelligence</span></div></div>
-   <nav className="navLinks"><a href="#overview">Overview</a><a href="#business">Business</a><a href="#application">Application</a><a href="#services">Services</a><a href="#traces">Traces</a></nav>
+   <nav className="navLinks"><a href="#overview">Overview</a><a href="#telemetry">Telemetry</a><a href="#business">Business</a><a href="#application">Application</a><a href="#services">Services</a><a href="#traces">Traces</a></nav>
    <div className="navRight"><span className="liveDot"/><span>Live</span><b>{data?.agent_id||'—'}</b><button onClick={refresh} disabled={loading}>{loading?'Refreshing…':'Refresh'}</button></div>
   </header>
   <div className="toolbar">
@@ -49,6 +49,17 @@ function AskSpareM({data,question,setQuestion,onAsk,loading,result}){
    {answer?.evidence_gaps?.length>0&&<div className="copilotGaps"><span>What SPARE-M still cannot prove</span><p>{answer.evidence_gaps.slice(0,3).join(' • ')}</p></div>}
    {result?.tools_used?.length>0&&<small className="copilotTools">Evidence checked: {result.tools_used.map(x=>x.replaceAll('_',' ')).join(' • ')}</small>}
   </div>}
+ </section>
+}
+
+function TelemetryCoverage({data}){
+ const c=data?.intelligence?.coverage;if(!c)return null;
+ const categories=[['Business',c.categories?.business],['Technical',c.categories?.technical],['Runtime',c.categories?.runtime],['Infrastructure',c.categories?.infrastructure],['Change',c.categories?.change]];
+ const statusText=s=>s==='available'?'Live':s==='partial'?'Partial':s==='not_applicable'?'N/A':'Missing';
+ return <section className="coverageCard" id="telemetry">
+  <div className="coverageHeader"><div><span>TELEMETRY & UNDERSTANDING</span><h2>What SPARE-M can see right now</h2><p>Supported features become evidence only when a real signal is reporting. This view separates live telemetry from gaps.</p></div><div className="coverageScore"><b>{c.understanding_score}%</b><span>understanding</span></div></div>
+  <div className="categoryGrid">{categories.map(([name,value])=><div key={name}><span>{name}</span><b>{value??0}%</b><i><em style={{width:`${Math.max(0,Math.min(100,Number(value||0)))}%`}}/></i></div>)}</div>
+  <div className="signalMatrix">{(c.signals||[]).map(s=><div className={`signalItem ${s.status}`} key={s.id}><div><span>{s.label}</span><small>{s.evidence}</small></div><b>{statusText(s.status)}</b></div>)}</div>
  </section>
 }
 
@@ -122,5 +133,5 @@ export default function Dashboard(){
    setCopilot(j);
   }catch(e){setCopilot({agentic:false,reason:e.message})}finally{setCopilotLoading(false)}
  }
- return <main><Header data={data} range={range} setRange={setRange} stage={stage} setStage={setStage} refresh={load} loading={loading}/>{err&&<div className="errorBanner">{err}</div>}<Hero data={data} onAI={analyze} aiLoading={aiLoading} ai={ai}/><AskSpareM data={data} question={question} setQuestion={setQuestion} onAsk={askSpareM} loading={copilotLoading} result={copilot}/><KPIs data={data}/><BusinessFlow data={data}/><div className="twoCol"><ApplicationMap data={data}/><FixPanel data={data}/></div><ServiceHealth data={data}/><RequestHealth data={data}/><Traces data={data} onOpen={openTrace}/><footer>SPARE-M • Business value → technical health → what to fix</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
+ return <main><Header data={data} range={range} setRange={setRange} stage={stage} setStage={setStage} refresh={load} loading={loading}/>{err&&<div className="errorBanner">{err}</div>}<Hero data={data} onAI={analyze} aiLoading={aiLoading} ai={ai}/><AskSpareM data={data} question={question} setQuestion={setQuestion} onAsk={askSpareM} loading={copilotLoading} result={copilot}/><KPIs data={data}/><TelemetryCoverage data={data}/><BusinessFlow data={data}/><div className="twoCol"><ApplicationMap data={data}/><FixPanel data={data}/></div><ServiceHealth data={data}/><RequestHealth data={data}/><Traces data={data} onOpen={openTrace}/><footer>SPARE-M • Business value → technical health → what to fix</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
 }
