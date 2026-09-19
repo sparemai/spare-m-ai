@@ -87,7 +87,7 @@ function KPIs({data}){
  const cards=[
   ['Bookings observed',b.bookings_observed??0,'Confirmed-stage traces','business'],
   ['Payment attempts',b.payment_attempts_observed??0,'Payment-stage traces','business'],
-  ['Completion proxy',pct(b.completion_proxy_pct),'Search → Confirm','business'],
+  [b.transaction_value_observed!==null&&b.transaction_value_observed!==undefined?'Business value observed':'Completion proxy',b.transaction_value_observed!==null&&b.transaction_value_observed!==undefined?((b.currency?b.currency+' ':'')+Number(b.transaction_value_observed).toLocaleString()):pct(b.completion_proxy_pct),b.transaction_value_observed!==null&&b.transaction_value_observed!==undefined?'Trusted confirmed-booking value':'Search → Confirm','business'],
   ['4xx responses',h.codes?.['4xx']??0,'Client/request failures',(h.codes?.['4xx']||0)>0?'warn':'ok'],
   ['5xx responses',h.codes?.['5xx']??0,'Server failures',(h.codes?.['5xx']||0)>0?'bad':'ok'],
   ['Request p95',ms(h.p95_ms),'Across server requests','tech']
