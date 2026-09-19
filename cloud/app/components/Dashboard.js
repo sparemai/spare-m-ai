@@ -3,6 +3,7 @@ import {useEffect,useState} from 'react';
 
 const RANGES=[['15m','15 min'],['1h','1 hour'],['6h','6 hours'],['24h','24 hours']];
 const STAGES=['All','Search','Select','Login','Book','Payment','Confirm'];
+const COPILOT_PROMPTS=['How is my infrastructure health?','Why is Booking slow?','Which service needs attention?','Are 5xx errors increasing?','What should I fix first?','What telemetry am I missing?'];
 const ms=v=>Number(v||0)>=1000?`${(Number(v||0)/1000).toFixed(2)} s`:`${Math.round(Number(v||0))} ms`;
 const pct=v=>v===null||v===undefined?'—':`${Number(v).toFixed(1)}%`;
 const when=v=>v?new Date(v).toLocaleString([], {month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
@@ -20,6 +21,23 @@ function Hero({data,onAI,aiLoading,ai}){
  const aiText=ai?.response?.summary||e.summary;
  const aiFix=ai?.response?.next_actions?.[0]||e.what_to_fix;
  return <section className="hero"><div className="heroMain"><div className="overline">TODAY'S BUSINESS & APPLICATION STATUS</div><div className="heroTitle"><h1>{e.headline}</h1><Pill t={tone(e.status)}>{e.status}</Pill></div><p>{e.summary}</p><div className="heroFacts"><div><span>Business</span><b>Booking</b></div><div><span>Main technical area</span><b>{nice(e.technical?.service||'No issue isolated')}</b></div><div><span>Infrastructure</span><b>{e.infrastructure?.contribution||'LOW'} contribution</b></div><div><span>Confidence</span><b>{e.confidence}%</b></div></div></div><aside className="aiBrief"><div className="aiHead"><div><span>SPARE-M AI BRIEF</span><b>What this means</b></div><button onClick={onAI} disabled={aiLoading}>{aiLoading?'Analyzing…':'Analyze with AI'}</button></div><p>{aiText}</p><div className="fixBox"><span>WHAT TO DO</span><b>{aiFix}</b></div>{lead&&<small>Current evidence: {lead.title} • {lead.confidence}% hypothesis confidence</small>}</aside></section>
+}
+
+function AskSpareM({data,question,setQuestion,onAsk,loading,result}){
+ const answer=result?.response;
+ const fallback=result?.reason||result?.deterministic_assessment?.assessment;
+ const ask=q=>{const text=String(q||question||'').trim();if(text)onAsk(text)};
+ return <section className="copilot">
+  <div className="copilotHead"><div><span>ASK SPARE-M</span><h2>Ask about your application in plain English</h2><p>SPARE-M answers from the telemetry, business journey and infrastructure context currently visible on this page.</p></div><Pill t={result?.agentic?'good':'neutral'}>{result?.agentic?'AI connected':'Evidence grounded'}</Pill></div>
+  <form className="copilotForm" onSubmit={e=>{e.preventDefault();ask()}}><input value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Example: How is my infrastructure health?" maxLength={1200}/><button disabled={loading||!question.trim()}>{loading?'Thinking…':'Ask'}</button></form>
+  <div className="copilotPrompts">{COPILOT_PROMPTS.map(q=><button key={q} onClick={()=>{setQuestion(q);ask(q)}} disabled={loading}>{q}</button>)}</div>
+  {(answer||fallback)&&<div className="copilotAnswer"><div className="copilotSummary"><span>SPARE-M ANSWER</span><h3>{answer?.summary||fallback}</h3>{answer?.confidence!==undefined&&<small>Evidence confidence {answer.confidence}%{result?.model?' • '+result.model:''}</small>}</div>
+   {answer&&<div className="copilotViews"><div><span>Business</span><p>{answer.business_assessment||'No additional business impact established.'}</p></div><div><span>Technical</span><p>{answer.technical_assessment||'No technical issue isolated.'}</p></div><div><span>Infrastructure</span><p>{answer.infrastructure_assessment||'No infrastructure issue isolated.'}</p></div></div>}
+   {answer?.next_actions?.length>0&&<div className="copilotActions"><span>WHAT TO DO</span>{answer.next_actions.slice(0,3).map((x,i)=><b key={i}>{i+1}. {x}</b>)}</div>}
+   {answer?.evidence_gaps?.length>0&&<div className="copilotGaps"><span>What SPARE-M still cannot prove</span><p>{answer.evidence_gaps.slice(0,3).join(' • ')}</p></div>}
+   {result?.tools_used?.length>0&&<small className="copilotTools">Evidence checked: {result.tools_used.map(x=>x.replaceAll('_',' ')).join(' • ')}</small>}
+  </div>}
+ </section>
 }
 
 function KPIs({data}){
@@ -77,10 +95,20 @@ function TraceDrawer({trace,onClose}){
 }
 
 export default function Dashboard(){
- const [range,setRange]=useState('15m'),[stage,setStage]=useState('All'),[data,setData]=useState(null),[loading,setLoading]=useState(false),[err,setErr]=useState(''),[trace,setTrace]=useState(null),[ai,setAI]=useState(null),[aiLoading,setAILoading]=useState(false);
+ const [range,setRange]=useState('15m'),[stage,setStage]=useState('All'),[data,setData]=useState(null),[loading,setLoading]=useState(false),[err,setErr]=useState(''),[trace,setTrace]=useState(null),[ai,setAI]=useState(null),[aiLoading,setAILoading]=useState(false),[question,setQuestion]=useState(''),[copilot,setCopilot]=useState(null),[copilotLoading,setCopilotLoading]=useState(false);
  async function load(){setLoading(true);try{const r=await fetch(`/api/overview?range=${range}&stage=${stage}`,{cache:'no-store'}),j=await r.json();if(!r.ok)throw new Error(j.error||'Unable to load');setData(j);setErr('')}catch(e){setErr(e.message)}finally{setLoading(false)}}
  useEffect(()=>{load();const id=setInterval(load,20000);return()=>clearInterval(id)},[range,stage]);
  async function openTrace(id){setTrace({loading:true});try{const r=await fetch(`/api/trace?trace_id=${encodeURIComponent(id)}`,{cache:'no-store'}),j=await r.json();if(!r.ok)throw new Error(j.error||'Trace unavailable');setTrace(j)}catch(e){setTrace({error:e.message})}}
  async function analyze(){if(!data?.agent_id)return;setAILoading(true);try{const r=await fetch('/api/investigate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({agent_id:data.agent_id,range,stage,mode:'quick'})}),j=await r.json();if(!r.ok)throw new Error(j.error||'AI analysis failed');setAI(j)}catch(e){setAI({response:{summary:e.message,next_actions:[]}})}finally{setAILoading(false)}}
- return <main><Header data={data} range={range} setRange={setRange} stage={stage} setStage={setStage} refresh={load} loading={loading}/>{err&&<div className="errorBanner">{err}</div>}<Hero data={data} onAI={analyze} aiLoading={aiLoading} ai={ai}/><KPIs data={data}/><BusinessFlow data={data}/><div className="twoCol"><ApplicationMap data={data}/><FixPanel data={data}/></div><ServiceHealth data={data}/><RequestHealth data={data}/><Traces data={data} onOpen={openTrace}/><footer>SPARE-M • Business value → technical health → what to fix</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
+ async function askSpareM(q){
+  if(!data?.agent_id||!q)return;
+  setCopilotLoading(true);
+  try{
+   const context={application:'EasyTravel',journey:'Booking',stage,range,service:data?.executive?.technical?.service||null,host:data?.application_view?.host?.hostname||null};
+   const r=await fetch('/api/investigate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({agent_id:data.agent_id,range,stage,mode:'quick',question:q,context})});
+   const j=await r.json();if(!r.ok)throw new Error(j.error||'SPARE-M could not answer');
+   setCopilot(j);
+  }catch(e){setCopilot({agentic:false,reason:e.message})}finally{setCopilotLoading(false)}
+ }
+ return <main><Header data={data} range={range} setRange={setRange} stage={stage} setStage={setStage} refresh={load} loading={loading}/>{err&&<div className="errorBanner">{err}</div>}<Hero data={data} onAI={analyze} aiLoading={aiLoading} ai={ai}/><AskSpareM data={data} question={question} setQuestion={setQuestion} onAsk={askSpareM} loading={copilotLoading} result={copilot}/><KPIs data={data}/><BusinessFlow data={data}/><div className="twoCol"><ApplicationMap data={data}/><FixPanel data={data}/></div><ServiceHealth data={data}/><RequestHealth data={data}/><Traces data={data} onOpen={openTrace}/><footer>SPARE-M • Business value → technical health → what to fix</footer><TraceDrawer trace={trace} onClose={()=>setTrace(null)}/></main>
 }
