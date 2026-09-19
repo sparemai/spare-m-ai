@@ -5,6 +5,7 @@ param(
  [string]$AgentId=$env:COMPUTERNAME,
  [ValidateRange(15,600)][int]$IntervalSeconds=30,
  [string]$LogFiles='',
+ [string]$ProbeTargets='',
  [bool]$EnableProcess=$true,
  [bool]$EnableNetwork=$true,
  [bool]$EnableDisk=$true,
@@ -81,6 +82,23 @@ function Collect-Network{
   $d=@{};foreach($s in $tcp.CounterSamples){$leaf=($s.Path -split '\\')[-1];$d[$leaf]=[double]$s.CookedValue}
   $out+=@{event_time=$now;agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id='tcpv4';data=@{tcp_retransmits_per_sec=$d['Segments Retransmitted/sec'];tcp_connections_established=$d['Connections Established']}}
  }catch{Write-Warning "TCP counters unavailable: $($_.Exception.Message)"}
+ return $out
+}
+function Collect-Probes{
+ if([string]::IsNullOrWhiteSpace($ProbeTargets)){return @()}
+ $now=(Get-Date).ToUniversalTime().ToString('o');$out=@()
+ foreach($target in ($ProbeTargets -split ';'|Where-Object {$_})){
+  try{
+   $samples=@(Test-Connection -ComputerName $target -Count 3 -ErrorAction SilentlyContinue)
+   $received=$samples.Count;$loss=[Math]::Round((3-$received)*100/3,2)
+   $times=@($samples|ForEach-Object {[double]$_.ResponseTime})
+   $avg=if($times.Count){[Math]::Round(($times|Measure-Object -Average).Average,2)}else{$null}
+   $max=if($times.Count){[Math]::Round(($times|Measure-Object -Maximum).Maximum,2)}else{$null}
+   $out+=@{event_time=$now;agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id="probe:$target";data=@{kind='active_probe';target=$target;sent=3;received=$received;packet_loss_pct=$loss;latency_avg_ms=$avg;latency_max_ms=$max}}
+  }catch{
+   $out+=@{event_time=$now;agent_id=$AgentId;hostname=$env:COMPUTERNAME;entity_id="probe:$target";data=@{kind='active_probe';target=$target;sent=3;received=0;packet_loss_pct=100;error=(Mask-Log $_.Exception.Message)}}
+  }
+ }
  return $out
 }
 function Collect-Disk{
@@ -176,10 +194,11 @@ function Poll-Command{
 
 Write-Host "SPARE-M extended sensors started for $AgentId" -ForegroundColor Green
 Write-Host "Interval: ${IntervalSeconds}s; process=$EnableProcess network=$EnableNetwork disk=$EnableDisk logs=$EnableLogs commands=$EnableCommands"
+if($ProbeTargets){Write-Host "Active network probes: $ProbeTargets"}
 while($true){
  $started=Get-Date
  if($EnableProcess){Send-Events 'process' (Collect-Processes)}
- if($EnableNetwork){Send-Events 'network' (Collect-Network)}
+ if($EnableNetwork){Send-Events 'network' (Collect-Network);Send-Events 'network' (Collect-Probes)}
  if($EnableDisk){Send-Events 'disk' (Collect-Disk)}
  if($EnableLogs){Send-Events 'logs' (Read-NewLogs)}
  Poll-Command
